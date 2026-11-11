@@ -6,7 +6,7 @@
 
 ## What is RemitPal?
 
-**RemitPal** is a family finance app for the corridor that matters most to millions of Indonesian domestic workers: Hong Kong → Indramayu, West Java.
+**RemitPal** is a family finance app for the Indonesian migrant workers.
 
 Siti Rahayu works as an elderly-care assistant in Causeway Bay. Every month she sends 15,000,000 IDR home to her husband Slamet Widodo so he can pay for the family's house renovation, the kids' school fees, and household expenses — while she is 3,000 km away and can only check receipts over WhatsApp.
 
