@@ -29,7 +29,7 @@ import {
 } from './server/db.ts';
 import type { UserProfile } from './src/types';
 import { broadcastEventNotification } from './server/whatsapp.ts';
-import { sendPayout, getPayoutStatus, isPayPalConfigured, payPalConfigError } from './server/paypal.ts';
+import { createPersonalPaymentToken, getPersonalPaymentToken, isPayPalConfigured, payPalConfigError, idrToUsd, PayPalError } from './server/paypal.ts';
 import { runAgent, isAgentEnabled } from './server/agent.ts';
 import type { AgentRequest } from './server/agent.ts';
 
@@ -62,14 +62,28 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   });
 }
 
+// Role guard — must run after requireAuth (which sets (req as any).user).
+// 'remitter' is Siti; 'manager' is Slamet.
+function requireRole(role: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as any).user as { role?: string } | undefined;
+    if (!user || user.role !== role) {
+      return res.status(403).json({ error: 'Only Siti (remitter) can perform this action.' });
+    }
+    next();
+  };
+}
+
 // -------------------------------------------------------------
 // Service Status (real vs mock) — no secrets exposed
 // -------------------------------------------------------------
 
 /**
  * Reports whether each integration is wired for REAL calls or running in mock
- * mode, plus the configured model/paypal environment. Used by the frontend to
- * show LIVE / MOCK badges so it's obvious the app uses real PayPal + Gemini.
+ * mode, plus the configured model. PUBLIC on purpose: it returns booleans and
+ * the model name only — no secrets, no credentials, no tokens.
+ * PayPal env is always reported as 'sandbox': live PayPal is never used
+ * (server/paypal.ts ignores PAYPAL_ENV=live with a warning).
  */
 app.get('/api/status', (_req: Request, res: Response) => {
   const agentMock = process.env.AGENT_MOCK === 'true';
@@ -89,17 +103,22 @@ app.get('/api/status', (_req: Request, res: Response) => {
     paypal: {
       configured: paypalConfigured,
       mock: paypalMock,
-      env: process.env.PAYPAL_ENV === 'live' ? 'live' : 'sandbox',
+      env: 'sandbox',
     },
   });
+});
+
+// Public liveness probe for the Render health check — returns only {ok:true}.
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.json({ ok: true });
 });
 
 // -------------------------------------------------------------
 // Auth Endpoints
 // -------------------------------------------------------------
 
-// List public users (for quick selection in UI)
-app.get('/api/auth/users', async (_req: Request, res: Response) => {
+// List users (usernames + roles only, no passwords) — authenticated users only.
+app.get('/api/auth/users', requireAuth, async (_req: Request, res: Response) => {
   try {
     const users = await getUsers();
     res.json({ success: true, users });
@@ -163,7 +182,7 @@ app.post('/api/auth/logout', async (req: Request, res: Response) => {
 // -------------------------------------------------------------
 
 // Get all app data from PostgreSQL
-app.get('/api/data', async (_req: Request, res: Response) => {
+app.get('/api/data', requireAuth, async (_req: Request, res: Response) => {
   try {
     const data = await getAppData();
     res.json({ success: true, data });
@@ -173,8 +192,8 @@ app.get('/api/data', async (_req: Request, res: Response) => {
   }
 });
 
-// Replace all app data (import JSON)
-app.post('/api/data', async (req: Request, res: Response) => {
+// Replace all app data (import JSON) — remitter only (destructive).
+app.post('/api/data', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
   try {
     const data = req.body;
     if (!data || !Array.isArray(data.expenses) || !Array.isArray(data.remittances)) {
@@ -190,7 +209,7 @@ app.post('/api/data', async (req: Request, res: Response) => {
 });
 
 // Upsert Expense
-app.post('/api/expenses', async (req: Request, res: Response) => {
+app.post('/api/expenses', requireAuth, async (req: Request, res: Response) => {
   try {
     const expense = req.body;
     if (!expense || !expense.id || !expense.title) {
@@ -228,8 +247,8 @@ app.post('/api/expenses', async (req: Request, res: Response) => {
   }
 });
 
-// Update Expense Receipt Status (verification by Siti)
-app.patch('/api/expenses/:id/receipt', async (req: Request, res: Response) => {
+// Update Expense Receipt Status (verification by Siti) — remitter only.
+app.patch('/api/expenses/:id/receipt', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { receiptStatus, verificationNotes, verifiedAt } = req.body;
@@ -263,7 +282,7 @@ app.patch('/api/expenses/:id/receipt', async (req: Request, res: Response) => {
 });
 
 // Delete Expense
-app.delete('/api/expenses/:id', async (req: Request, res: Response) => {
+app.delete('/api/expenses/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await deleteExpense(id);
@@ -274,8 +293,8 @@ app.delete('/api/expenses/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Upsert Remittance
-app.post('/api/remittances', async (req: Request, res: Response) => {
+// Upsert Remittance — remitter only.
+app.post('/api/remittances', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
   try {
     const record = req.body;
     if (!record || !record.id || !record.amountIdr) {
@@ -312,8 +331,8 @@ app.post('/api/remittances', async (req: Request, res: Response) => {
   }
 });
 
-// Delete Remittance
-app.delete('/api/remittances/:id', async (req: Request, res: Response) => {
+// Delete Remittance — remitter only.
+app.delete('/api/remittances/:id', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await deleteRemittance(id);
@@ -325,83 +344,144 @@ app.delete('/api/remittances/:id', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
-// PayPal Payouts Endpoints (Siti -> Slamet)
+// PayPal Personal Payments v2 Endpoints (sandbox only, Siti -> Slamet)
 // -------------------------------------------------------------
+// Flow: POST /tokens (server derives USD from the approved IDR total at
+// Rp 16,000/USD) -> frontend redirects Siti to PayPal's UI -> PayPal
+// returns her with ?status=...&transactionId=... -> frontend looks the
+// token up via GET /tokens/:id -> a ledger record is created ONLY when
+// the token lookup says COMPLETED (or SUCCESS) AND a transactionId is
+// present. No record is ever created before the return is verified.
+
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 /**
- * Send a real PayPal payout to Slamet.
- *
- * Only the remitter (Siti) may call this — the requireAuth middleware
- * resolves the session and the role check enforces the sender constraint.
- * This endpoint is intentionally payout-only: it returns the PayPal batch id
- * and status so the frontend can build a RemittanceRecord and persist it
- * through the normal /api/remittances flow (which also fires the single
- * notification + WhatsApp broadcast). Keeping the payout separate avoids
- * double notifications.
+ * Create a Personal Payments token for Siti to approve in PayPal's UI.
+ * Remitter-only. Body: {amountIdr (required, positive integer),
+ * externalReferenceId (required, 1-127 chars), note?, returnUrl (required)}.
+ * The USD amount is derived server-side from amountIdr at Rp 16,000/USD;
+ * any client-supplied USD amount that differs by more than $0.01 is rejected.
+ * Receiver is always PAYPAL_RECIPIENT_EMAIL (Slamet's sandbox personal
+ * account). Without credentials (and not in mock mode) -> 503
+ * MISSING_CREDENTIALS, never a fake token.
  */
-app.post('/api/paypal/send', requireAuth, async (req: Request, res: Response) => {
+app.post('/api/paypal/personal-payments/tokens', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user as { role: string };
-    if (user.role !== 'remitter') {
-      return res.status(403).json({ error: 'Only the remitter (Siti) can send remittances.' });
+    const { amountIdr, externalReferenceId, note, returnUrl, amount, amountUsd } = req.body || {};
+
+    if (!Number.isInteger(amountIdr) || amountIdr <= 0) {
+      return res.status(400).json({ error: 'amountIdr is required and must be a positive integer (IDR).' });
+    }
+    if (typeof externalReferenceId !== 'string' || externalReferenceId.length < 1 || externalReferenceId.length > 127) {
+      return res.status(400).json({ error: 'externalReferenceId is required, 1-127 characters.' });
+    }
+    if (note !== undefined && note !== null && (typeof note !== 'string' || note.length > 255)) {
+      return res.status(400).json({ error: 'note, when given, must be a string of at most 255 characters.' });
+    }
+    if (!isHttpUrl(returnUrl)) {
+      return res.status(400).json({ error: 'returnUrl is required and must be an http(s) URL.' });
     }
 
-    const { amount, currency, note } = req.body || {};
-    if (!amount || !currency) {
-      return res.status(400).json({ error: 'PayPal amount and currency are required.' });
+    // USD is always derived server-side from the approved IDR total.
+    const amountUsdDerived = idrToUsd(amountIdr);
+    const clientAmount = amount ?? amountUsd;
+    if (clientAmount !== undefined && clientAmount !== null) {
+      const clientNum = Number(clientAmount);
+      if (!Number.isFinite(clientNum) || Math.abs(clientNum - Number(amountUsdDerived)) > 0.01) {
+        return res.status(400).json({ error: `USD amount must equal amountIdr / 16000 (derived: $${amountUsdDerived}).` });
+      }
     }
 
+    const receiverEmail = process.env.PAYPAL_RECIPIENT_EMAIL;
+    if (!receiverEmail && process.env.PAYPAL_MOCK !== 'true') {
+      return res.status(503).json({ error: 'PayPal is not configured: PayPal recipient not set (PAYPAL_RECIPIENT_EMAIL).', code: 'MISSING_CREDENTIALS' });
+    }
     if (!isPayPalConfigured()) {
       const cfgErr = payPalConfigError();
-      return res.status(503).json({ error: `PayPal is not configured: ${cfgErr}` });
+      return res.status(503).json({ error: `PayPal is not configured: ${cfgErr}`, code: 'MISSING_CREDENTIALS' });
     }
 
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      return res.status(400).json({ error: 'PayPal amount must be a positive number.' });
-    }
-
-    // PayPal expects a string with two decimal places.
-    const formattedAmount = numericAmount.toFixed(2);
-    const payout = await sendPayout({
-      amount: formattedAmount,
-      currency: String(currency).toUpperCase(),
-      note: note || 'Family remittance from Siti via RemitPal',
-      senderItemId: `remitpal_${Date.now()}`,
+    const tokenResult = await createPersonalPaymentToken({
+      receiverEmail: receiverEmail || 'mock-recipient@example.com',
+      amount: amountUsdDerived,
+      currency: 'USD',
+      noteToReceiver: note,
+      externalReferenceId,
+      returnUrl,
     });
 
-    res.json({
-      success: true,
-      payout: {
-        payoutBatchId: payout.payoutBatchId,
-        batchStatus: payout.batchStatus,
-        transactionStatus: payout.items[0]?.transactionStatus,
-        amount: { value: formattedAmount, currency: String(currency).toUpperCase() },
-        mock: payout.mock,
-      },
-    });
+    res.json({ success: true, token: tokenResult });
   } catch (err: any) {
-    console.error('[PayPal Send Error]:', err);
-    res.status(500).json({ error: err.message || 'PayPal payout failed.' });
+    console.error('[PayPal Token Error]:', err);
+    if (err instanceof PayPalError) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
+    res.status(500).json({ error: err.message || 'PayPal token creation failed.' });
   }
 });
 
 /**
- * Check the status of a previously-created PayPal payout batch.
- * Lets the UI refresh a payout that was created in PENDING/PROCESSING state.
+ * Look up a Personal Payments token after the PayPal return.
+ * Any authenticated role. Validates the token id format; never invents a
+ * transaction id — the response carries PayPal's id, or null.
  */
-app.get('/api/paypal/status/:batchId', requireAuth, async (req: Request, res: Response) => {
+app.get('/api/paypal/personal-payments/tokens/:tokenId', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { batchId } = req.params;
-    const status = await getPayoutStatus(batchId);
-    res.json({
-      success: true,
-      batchStatus: status.batchStatus,
-      transactionStatus: status.items[0]?.transactionStatus,
-    });
+    const { tokenId } = req.params;
+    if (!tokenId || !/^[A-Za-z0-9_-]+$/.test(tokenId)) {
+      return res.status(400).json({ error: 'Token id in the URL is missing or malformed.' });
+    }
+    if (!isPayPalConfigured()) {
+      const cfgErr = payPalConfigError();
+      return res.status(503).json({ error: `PayPal is not configured: ${cfgErr}`, code: 'MISSING_CREDENTIALS' });
+    }
+    const status = await getPersonalPaymentToken(tokenId);
+    res.json({ success: true, ...status });
   } catch (err: any) {
-    console.error('[PayPal Status Error]:', err);
-    res.status(500).json({ error: err.message || 'PayPal status check failed.' });
+    console.error('[PayPal Token Lookup Error]:', err);
+    if (err instanceof PayPalError) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
+    res.status(500).json({ error: err.message || 'PayPal token lookup failed.' });
+  }
+});
+
+/**
+ * DEMO MODE manual record (mock only). Remitter-only. Returns a MOCK
+ * reference number; it does NOT create a remittance record itself — the
+ * frontend builds the record and labels it MOCK. Returns 400 unless
+ * PAYPAL_MOCK === 'true'.
+ */
+app.post('/api/paypal/personal-payments/manual-record', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
+  try {
+    if (process.env.PAYPAL_MOCK !== 'true') {
+      return res.status(400).json({ error: 'Manual record is only available in DEMO MODE (PAYPAL_MOCK=true).' });
+    }
+    const { amountIdr, monthYear, allocations, note } = req.body || {};
+    if (!Number.isInteger(amountIdr) || amountIdr <= 0) {
+      return res.status(400).json({ error: 'amountIdr is required and must be a positive integer (IDR).' });
+    }
+    if (typeof monthYear !== 'string' || !/^\d{4}-\d{2}$/.test(monthYear)) {
+      return res.status(400).json({ error: 'monthYear is required (YYYY-MM).' });
+    }
+    if (allocations !== undefined && (typeof allocations !== 'object' || allocations === null || Array.isArray(allocations))) {
+      return res.status(400).json({ error: 'allocations, when given, must be an object of category -> IDR amount.' });
+    }
+    if (note !== undefined && note !== null && (typeof note !== 'string' || note.length > 255)) {
+      return res.status(400).json({ error: 'note, when given, must be a string of at most 255 characters.' });
+    }
+    res.json({ success: true, mock: true, referenceNo: `MOCK-${Date.now()}` });
+  } catch (err: any) {
+    console.error('[PayPal Manual Record Error]:', err);
+    res.status(500).json({ error: err.message || 'Manual record failed.' });
   }
 });
 
@@ -446,8 +526,8 @@ app.post('/api/agent/chat', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
-// Upsert Monthly Budget
-app.post('/api/budgets', async (req: Request, res: Response) => {
+// Upsert Monthly Budget — remitter only.
+app.post('/api/budgets', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
   try {
     const budget = req.body;
     if (!budget || !budget.monthYear) {
@@ -462,7 +542,7 @@ app.post('/api/budgets', async (req: Request, res: Response) => {
 });
 
 // Upsert Calendar Event
-app.post('/api/calendar-events', async (req: Request, res: Response) => {
+app.post('/api/calendar-events', requireAuth, async (req: Request, res: Response) => {
   try {
     const event = req.body;
     if (!event || !event.id || !event.title) {
@@ -477,7 +557,7 @@ app.post('/api/calendar-events', async (req: Request, res: Response) => {
 });
 
 // Toggle Calendar Event
-app.patch('/api/calendar-events/:id/toggle', async (req: Request, res: Response) => {
+app.patch('/api/calendar-events/:id/toggle', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await toggleCalendarEvent(id);
@@ -489,7 +569,7 @@ app.patch('/api/calendar-events/:id/toggle', async (req: Request, res: Response)
 });
 
 // Delete Calendar Event
-app.delete('/api/calendar-events/:id', async (req: Request, res: Response) => {
+app.delete('/api/calendar-events/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await deleteCalendarEvent(id);
@@ -500,8 +580,8 @@ app.delete('/api/calendar-events/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Reset Database to Seed Data
-app.post('/api/reset', async (_req: Request, res: Response) => {
+// Reset Database to Seed Data — remitter only (destructive).
+app.post('/api/reset', requireAuth, requireRole('remitter'), async (_req: Request, res: Response) => {
   try {
     await resetDatabase();
     const data = await getAppData();
@@ -517,7 +597,7 @@ app.post('/api/reset', async (_req: Request, res: Response) => {
 // -------------------------------------------------------------
 
 // Get all activity notifications
-app.get('/api/notifications', async (_req: Request, res: Response) => {
+app.get('/api/notifications', requireAuth, async (_req: Request, res: Response) => {
   try {
     const notifications = await getNotifications();
     res.json({ success: true, notifications });
@@ -528,7 +608,7 @@ app.get('/api/notifications', async (_req: Request, res: Response) => {
 });
 
 // Create custom notification
-app.post('/api/notifications', async (req: Request, res: Response) => {
+app.post('/api/notifications', requireAuth, async (req: Request, res: Response) => {
   try {
     const payload = req.body;
     if (!payload || !payload.title) {
@@ -543,7 +623,7 @@ app.post('/api/notifications', async (req: Request, res: Response) => {
 });
 
 // Mark single notification as read
-app.patch('/api/notifications/:id/read', async (req: Request, res: Response) => {
+app.patch('/api/notifications/:id/read', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await markNotificationRead(id);
@@ -555,7 +635,7 @@ app.patch('/api/notifications/:id/read', async (req: Request, res: Response) => 
 });
 
 // Mark all notifications as read
-app.post('/api/notifications/read-all', async (_req: Request, res: Response) => {
+app.post('/api/notifications/read-all', requireAuth, async (_req: Request, res: Response) => {
   try {
     await markAllNotificationsRead();
     res.json({ success: true });
@@ -566,7 +646,7 @@ app.post('/api/notifications/read-all', async (_req: Request, res: Response) => 
 });
 
 // Delete notification
-app.delete('/api/notifications/:id', async (req: Request, res: Response) => {
+app.delete('/api/notifications/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await deleteNotification(id);
