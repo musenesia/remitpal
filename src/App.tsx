@@ -1,21 +1,22 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ActiveTab, AppData, AppNotification, CalendarEvent, ExpenseItem, MonthlyBudget, ReceiptStatus, RemittanceRecord, UserProfile } from './types';
 import { translations } from './i18n/translations';
-import { loadAppData, saveAppData } from './utils/storage';
+import { saveAppData } from './utils/storage';
+import { INITIAL_DATA } from './data/initialData';
+import { formatCurrencyIdr } from './utils/formatters';
 import { 
-  fetchAppData, 
-  syncAllData, 
-  syncExpense, 
-  syncExpenseReceiptStatus, 
-  deleteExpenseApi, 
-  syncRemittance, 
-  syncBudget, 
-  syncCalendarEvent, 
-  toggleCalendarEventApi, 
-  deleteCalendarEventApi, 
+  fetchAppData,
+  syncAllData,
+  syncExpense,
+  syncExpenseReceiptStatus,
+  deleteExpenseApi,
+  syncRemittance,
+  syncBudget,
+  syncCalendarEvent,
+  toggleCalendarEventApi,
+  deleteCalendarEventApi,
   resetDatabaseApi,
   getStoredAuth,
-  loginApi,
   logoutApi,
   checkSessionApi,
   saveStoredAuth,
@@ -24,6 +25,9 @@ import {
   markAllNotificationsReadApi,
   deleteNotificationApi,
   fetchServiceStatus,
+  getPersonalPaymentToken,
+  loadPendingPersonalPayment,
+  clearPendingPersonalPayment,
   type ServiceStatus,
 } from './utils/api';
 import { Sidebar } from './components/Sidebar';
@@ -42,6 +46,17 @@ import { DataManagementModal } from './components/DataManagementModal';
 import { AuthModal } from './components/AuthModal';
 import { NotificationFeed } from './components/NotificationFeed';
 import { ChatBar } from './components/ChatBar';
+
+// Data shown before login: the worker profile only — no seeded expenses,
+// remittances, budgets, calendar events, or notifications. An
+// unauthenticated viewer must not see the family ledger.
+const EMPTY_SHELL_DATA: AppData = {
+  ...INITIAL_DATA,
+  budgets: [],
+  remittances: [],
+  expenses: [],
+  calendarEvents: [],
+};
 
 export default function App() {
   // English-only translations
@@ -72,47 +87,15 @@ export default function App() {
   const [isDbConnected, setIsDbConnected] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   
-  // Default to Siti (Remitter in Hong Kong) on initial load for instant usability
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    const stored = getStoredAuth();
-    if (stored.user) return stored.user;
-    return {
-      id: 'usr-siti',
-      username: 'siti',
-      email: 'siti@remitpal.com',
-      name: 'Siti Rahayu',
-      role: 'remitter',
-      location: 'Causeway Bay, Hong Kong',
-      avatarUrl: '/src/assets/images/worker_profile_avatar_1794285313427.jpg'
-    };
-  });
-
-  // Verify auth session on boot
-  useEffect(() => {
-    const stored = getStoredAuth();
-    if (stored.token) {
-      checkSessionApi(stored.token).then(user => {
-        if (user) {
-          setCurrentUser(user);
-        }
-      });
-    }
-  }, []);
+  // No assumed user on boot: null until a stored session is verified.
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
 
   // 3. Application Data state (synced with PostgreSQL, cached locally for offline reliability)
-  const [data, setData] = useState<AppData>(() => loadAppData());
+  // Until authenticated, the empty shell: no seeded ledger for an unauthenticated viewer.
+  const [data, setData] = useState<AppData>(EMPTY_SHELL_DATA);
 
-  // Load from server on mount
-  useEffect(() => {
-    let isMounted = true;
-    fetchAppData().then(({ data: fetched, fromServer }) => {
-      if (isMounted) {
-        setData(fetched);
-        setIsDbConnected(fromServer);
-      }
-    });
-    return () => { isMounted = false; };
-  }, []);
+  // PayPal return notice (shown in the banner area below the header).
+  const [notice, setNotice] = useState<string | null>(null);
 
   const handleSaveData = (newData: AppData) => {
     setData(newData);
@@ -127,11 +110,115 @@ export default function App() {
     fetchNotifications().then(setNotifications);
   }, []);
 
-  useEffect(() => {
-    loadNotifications();
-  }, [loadNotifications]);
+  // PayPal Personal Payments return handling (single place). On mount the
+  // URL may carry ?status=...&transactionId=... from PayPal's UI. A ledger
+  // record is created ONLY when a pending transfer exists in sessionStorage
+  // AND status is 'success' AND the token lookup says COMPLETED (or
+  // SUCCESS) AND a transactionId is present. Anything else creates no
+  // record — the pending transfer is cleared and a notice is shown.
+  const handlePayPalReturn = useCallback(async () => {
+    const params = new URLSearchParams(window.location.search);
+    const queryStatus = params.get('status');
+    const queryTransactionId = params.get('transactionId');
+    if (!queryStatus && !queryTransactionId) return;
 
-  // Live integration status (real vs mock) for Gemini agent + PayPal payouts.
+    const pending = loadPendingPersonalPayment();
+    // Always clean the return params from the URL so a refresh cannot re-trigger.
+    window.history.replaceState({}, '', window.location.pathname);
+    if (!pending) {
+      if (queryStatus) {
+        setNotice('PayPal return received but no pending transfer was found — no record was created.');
+      }
+      return;
+    }
+
+    if (queryStatus !== 'success') {
+      clearPendingPersonalPayment();
+      setNotice(`PayPal payment was not completed (status: ${queryStatus || 'unknown'}) — no record was created.`);
+      return;
+    }
+
+    const lookup = await getPersonalPaymentToken(pending.tokenId);
+    if (!lookup.success || !lookup.status) {
+      clearPendingPersonalPayment();
+      setNotice(`PayPal payment could not be confirmed (${lookup.error || 'lookup failed'}) — no record was created.`);
+      return;
+    }
+
+    const tokenStatus = lookup.status.status;
+    const transactionId = queryTransactionId || lookup.status.transactionId;
+    if ((tokenStatus === 'COMPLETED' || tokenStatus === 'SUCCESS') && transactionId) {
+      const allocLines = Object.entries(pending.allocations || {})
+        .filter(([, v]) => Number(v) > 0)
+        .map(([k, v]) => `${k} ${formatCurrencyIdr(Number(v))}`)
+        .join('; ');
+      const today = new Date().toISOString().slice(0, 10);
+      const record: RemittanceRecord = {
+        id: `rem-${Date.now()}`,
+        date: today,
+        monthYear: pending.monthYear,
+        amountIdr: pending.amountIdr,
+        transferService: 'PayPal (Personal Payments v2, sandbox)',
+        sender: `${data.workerProfile.name} (Hong Kong)`,
+        receiver: `${data.workerProfile.husbandName} (Indramayu)`,
+        referenceNo: transactionId,
+        notes:
+          `${pending.note ? pending.note + ' ' : ''}` +
+          `Allocation: ${allocLines || 'n/a'}. ` +
+          `PayPal Personal Payments v2 (sandbox) · USD ${pending.amountUsd} · transaction ${transactionId}.`,
+        status: 'received',
+      };
+      setData((prev) => {
+        const updated = { ...prev, remittances: [record, ...prev.remittances] };
+        saveAppData(updated);
+        return updated;
+      });
+      syncRemittance(record);
+      clearPendingPersonalPayment();
+      setNotice(`PayPal payment confirmed (transaction ${transactionId}) — remittance recorded.`);
+    } else {
+      clearPendingPersonalPayment();
+      setNotice(
+        `PayPal payment was not confirmed (token status: ${tokenStatus || 'unknown'}${transactionId ? '' : ', no transaction id'}) — no record was created.`
+      );
+    }
+  }, [data.workerProfile]);
+
+  // Boot: verify any stored session. Only a valid session loads server
+  // data and notifications; an invalid/missing session shows the login
+  // modal and keeps the empty shell. The PayPal return check runs after
+  // the data load so a confirmed record cannot be clobbered by it.
+  useEffect(() => {
+    const stored = getStoredAuth();
+    if (!stored.token) {
+      setCurrentUser(null);
+      setIsAuthModalOpen(true);
+      handlePayPalReturn();
+      return;
+    }
+    checkSessionApi(stored.token).then((user) => {
+      if (user) {
+        setCurrentUser(user);
+        fetchAppData().then(({ data: fetched, fromServer, unauthorized }) => {
+          if (unauthorized) {
+            setCurrentUser(null);
+            setIsAuthModalOpen(true);
+            return;
+          }
+          setData(fetched);
+          setIsDbConnected(fromServer);
+          loadNotifications();
+          handlePayPalReturn();
+        });
+      } else {
+        setCurrentUser(null);
+        setIsAuthModalOpen(true);
+        handlePayPalReturn();
+      }
+    });
+  }, [handlePayPalReturn, loadNotifications]);
+
+  // Live integration status (real vs mock) for Gemini agent + PayPal Personal Payments.
   // Fetched once on boot so the UI can show LIVE / MOCK badges — judges can
   // see at a glance that the app uses real PayPal + Gemini, not mockups.
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(null);
@@ -192,29 +279,34 @@ export default function App() {
   const handleLoginSuccess = (user: UserProfile, token: string) => {
     setCurrentUser(user);
     saveStoredAuth(user, token);
-    setIsDbConnected(true);
+    fetchAppData().then(({ data: fetched, fromServer, unauthorized }) => {
+      if (unauthorized) return;
+      setData(fetched);
+      setIsDbConnected(fromServer);
+    });
+    loadNotifications();
   };
 
   const handleLogout = async () => {
     const { token } = getStoredAuth();
     await logoutApi(token);
     setCurrentUser(null);
+    setData(EMPTY_SHELL_DATA);
+    setNotifications([]);
+    setIsDbConnected(false);
   };
 
-  // 1-Click quick account switcher between Siti and Slamet
+  // Account switcher: log out and open the login modal. There is no
+  // password-free quick switch — switching accounts requires signing in.
   const handleQuickSwitchUser = useCallback(async () => {
-    const targetUsername = currentUser?.username === 'siti' ? 'slamet' : 'siti';
-    const targetPassword = targetUsername === 'siti' ? 'siti123' : 'slamet123';
-    
-    const result = await loginApi(targetUsername, targetPassword);
-    if (result.success && result.user && result.token) {
-      setCurrentUser(result.user);
-      saveStoredAuth(result.user, result.token);
-      setIsDbConnected(true);
-    } else {
-      setIsAuthModalOpen(true);
-    }
-  }, [currentUser]);
+    const { token } = getStoredAuth();
+    await logoutApi(token);
+    setCurrentUser(null);
+    setData(EMPTY_SHELL_DATA);
+    setNotifications([]);
+    setIsDbConnected(false);
+    setIsAuthModalOpen(true);
+  }, []);
 
   // Calendar Event Handlers
   const handleOpenAddEvent = (defaultDate?: string) => {
@@ -421,6 +513,7 @@ export default function App() {
           onLogout={handleLogout}
           isDbConnected={isDbConnected}
           unreadNotificationsCount={unreadNotificationsCount}
+          serviceStatus={serviceStatus}
         />
 
         {/* Main Content Area (offset by left sidebar on desktop) */}
@@ -444,6 +537,19 @@ export default function App() {
             onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
             onNavigateTab={setCurrentTab}
           />
+
+          {/* PayPal return notice */}
+          {notice && (
+            <div className="px-4 sm:px-6 lg:px-8 py-2.5 text-xs font-medium border-b bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 border-amber-200/60 dark:border-amber-800/60 flex items-center justify-between gap-3">
+              <span>{notice}</span>
+              <button
+                onClick={() => setNotice(null)}
+                className="underline hover:no-underline font-semibold shrink-0"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {/* User Role Banner */}
           {currentUser && (
@@ -625,25 +731,3 @@ export default function App() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// ServiceBadge — a small LIVE / MOCK / OFF pill for an integration.
-// Green = real/live calls, amber = mock (demo only), grey = not configured.
-// Rendered in the role banner so judges can see PayPal + Gemini are real.
-// ---------------------------------------------------------------------------
-function ServiceBadge({ label, tone }: { label: string; tone: 'live' | 'mock' | 'off' }) {
-  const styles =
-    tone === 'live'
-      ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-      : tone === 'mock'
-      ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700';
-  const dot = tone === 'live' ? 'bg-emerald-500' : tone === 'mock' ? 'bg-amber-500' : 'bg-neutral-400';
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold font-mono ${styles}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-      {label}
-    </span>
-  );
-}

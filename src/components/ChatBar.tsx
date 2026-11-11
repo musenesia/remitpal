@@ -15,7 +15,9 @@ import { AppData, RemittanceRecord, UserProfile } from '../types';
 import { formatCurrencyIdr } from '../utils/formatters';
 import {
   sendAgentMessage,
-  sendPayPalPayout,
+  createPersonalPaymentToken,
+  savePendingPersonalPayment,
+  idrToUsdDisplay,
   getStoredAuth,
   type AgentHistoryTurn,
   type RemittanceApprovalDraft,
@@ -27,10 +29,9 @@ interface ChatMessage {
   text?: string;
   imageUrl?: string; // preview for user image messages
   pendingAction?: RemittanceApprovalDraft;
-  draftPaypalAmount?: number; // editable within the approval card
-  draftCurrency?: string; // editable within the approval card
-  actionState?: 'pending' | 'approving' | 'approved' | 'rejected';
+  actionState?: 'pending' | 'approving' | 'redirecting' | 'approved' | 'rejected';
   actionError?: string;
+  actionNote?: string; // e.g. DEMO MODE note shown on the approved banner
 }
 
 interface ChatBarProps {
@@ -40,8 +41,6 @@ interface ChatBarProps {
   onOpenAuthModal: () => void;
   onDataChanged: () => void;
 }
-
-const CURRENCY_OPTIONS = ['USD', 'HKD', 'IDR'];
 
 function fileToImage(file: File): Promise<{ dataUrl: string; data: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
@@ -142,8 +141,6 @@ export const ChatBar: React.FC<ChatBarProps> = ({
           role: 'assistant',
           text: r.text,
           pendingAction: r.pendingAction,
-          draftPaypalAmount: r.pendingAction?.paypalAmount,
-          draftCurrency: r.pendingAction?.currency || 'USD',
           actionState: r.pendingAction ? 'pending' : undefined,
         };
         setMessages((prev) => [...prev, assistantMsg]);
@@ -178,7 +175,11 @@ export const ChatBar: React.FC<ChatBarProps> = ({
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
-  // Approve a pending remittance draft: triggers the PayPal payout, records it.
+  // Approve a pending remittance draft: creates a PayPal Personal Payments
+  // v2 token (sandbox) and redirects Siti to PayPal's UI. No ledger record
+  // is created here — the record is created only after the PayPal return
+  // is verified in App.tsx. In mock mode (DEMO MODE) there is no redirect:
+  // the record is created immediately and labelled MOCK.
   const handleApprove = useCallback(
     async (msg: ChatMessage) => {
       if (!msg.pendingAction) return;
@@ -190,25 +191,9 @@ export const ChatBar: React.FC<ChatBarProps> = ({
       }
 
       updateMessage(msg.id, { actionState: 'approving', actionError: undefined });
-      const amount = msg.draftPaypalAmount ?? msg.pendingAction.paypalAmount;
-      const currency = msg.draftCurrency ?? msg.pendingAction.currency;
-
-      const result = await sendPayPalPayout({
-        amount: Number(amount),
-        currency: String(currency),
-        note: msg.pendingAction.note,
-      });
-
-      if (!result.success || !result.payout) {
-        updateMessage(msg.id, {
-          actionState: 'pending',
-          actionError: result.error || 'PayPal payout failed. Please try again.',
-        });
-        return;
-      }
-
-      const payout = result.payout;
-      const isReceived = payout.batchStatus === 'SUCCESS' || payout.transactionStatus === 'SUCCESS';
+      const amountIdr = Number(msg.pendingAction.amountIdr);
+      const monthYear = msg.pendingAction.monthYear || new Date().toISOString().slice(0, 7);
+      const amountUsd = idrToUsdDisplay(amountIdr);
       const today = new Date().toISOString().slice(0, 10);
 
       const allocLines = Object.entries(msg.pendingAction.allocations || {})
@@ -216,30 +201,73 @@ export const ChatBar: React.FC<ChatBarProps> = ({
         .map(([k, v]) => `${k} ${formatCurrencyIdr(Number(v))}`)
         .join('; ');
 
-      const record: RemittanceRecord = {
-        id: `rem-${Date.now()}`,
-        date: today,
-        monthYear: msg.pendingAction.monthYear || today.slice(0, 7),
-        amountIdr: Number(msg.pendingAction.amountIdr),
-        amountHkd: currency === 'HKD' ? Number(amount) : undefined,
-        transferService: 'PayPal',
-        sender: `${data.workerProfile.name} (Hong Kong)`,
-        receiver: `${data.workerProfile.husbandName} (Indramayu)`,
-        referenceNo: payout.payoutBatchId,
-        notes:
-          `${msg.pendingAction.note ? msg.pendingAction.note + ' ' : ''}` +
-          `Allocation: ${allocLines || 'n/a'}. Sent via PayPal (${currency} ${Number(amount).toFixed(2)})` +
-          `${payout.mock ? ' (MOCK)' : ''}. PayPal Batch: ${payout.payoutBatchId}.`,
-        status: isReceived ? 'received' : 'in_transit',
-      };
+      const result = await createPersonalPaymentToken({
+        amountIdr,
+        externalReferenceId: `remitpal-${monthYear}-${Date.now()}`,
+        note: msg.pendingAction.note,
+        returnUrl: window.location.origin + window.location.pathname,
+      });
 
-      onAddRemittance(record);
-      updateMessage(msg.id, { actionState: 'approved' });
-      // No need to call runAgentTurn here — the "Approved & sent" badge on the
-      // card is sufficient feedback and avoids triggering another agent turn
-      // that could mis-parse the confirmation message as a new remittance.
+      if (!result.success || !result.token) {
+        updateMessage(msg.id, {
+          actionState: 'pending',
+          actionError: result.error || 'PayPal token creation failed. Please try again.',
+        });
+        return;
+      }
+
+      const payToken = result.token;
+
+      // DEMO MODE (mock): no redirect, no real payment. Create the record
+      // immediately, labelled MOCK, with the mock token id as reference.
+      if (payToken.mock) {
+        const record: RemittanceRecord = {
+          id: `rem-${Date.now()}`,
+          date: today,
+          monthYear,
+          amountIdr,
+          transferService: 'PayPal (Personal Payments v2, sandbox)',
+          sender: `${data.workerProfile.name} (Hong Kong)`,
+          receiver: `${data.workerProfile.husbandName} (Indramayu)`,
+          referenceNo: payToken.tokenId,
+          notes:
+            `${msg.pendingAction.note ? msg.pendingAction.note + ' ' : ''}` +
+            `Allocation: ${allocLines || 'n/a'}. PayPal Personal Payments v2 (sandbox) · USD ${amountUsd} · token ${payToken.tokenId} (MOCK — DEMO MODE, no PayPal payment moved).`,
+          status: 'received',
+        };
+        onAddRemittance(record);
+        updateMessage(msg.id, {
+          actionState: 'approved',
+          actionNote: 'DEMO MODE — no PayPal payment moved (MOCK).',
+        });
+        return;
+      }
+
+      if (!payToken.initiatePaymentUrl) {
+        updateMessage(msg.id, {
+          actionState: 'pending',
+          actionError: 'PayPal did not return an approval URL. Please try again.',
+        });
+        return;
+      }
+
+      // Real (sandbox) flow: store the pending transfer BEFORE redirecting —
+      // PayPal's return carries no token id, so the return handler in App.tsx
+      // needs this to look the token up and verify COMPLETED.
+      savePendingPersonalPayment({
+        tokenId: payToken.tokenId,
+        amountIdr,
+        monthYear,
+        allocations: msg.pendingAction.allocations || {},
+        note: msg.pendingAction.note || '',
+        amountUsd,
+        currency: 'USD',
+        source: 'chat',
+      });
+      updateMessage(msg.id, { actionState: 'redirecting' });
+      window.location.href = payToken.initiatePaymentUrl;
     },
-    [data.workerProfile, onAddRemittance, onOpenAuthModal, runAgentTurn, updateMessage]
+    [data.workerProfile, onAddRemittance, onOpenAuthModal, updateMessage]
   );
 
   const handleReject = useCallback(
@@ -308,7 +336,6 @@ export const ChatBar: React.FC<ChatBarProps> = ({
                 message={m}
                 onApprove={handleApprove}
                 onReject={handleReject}
-                onChangeDraft={(patch) => updateMessage(m.id, patch)}
               />
             ))}
             {sending && (
@@ -406,8 +433,7 @@ const MessageBubble: React.FC<{
   message: ChatMessage;
   onApprove: (m: ChatMessage) => void;
   onReject: (m: ChatMessage) => void;
-  onChangeDraft: (patch: Partial<ChatMessage>) => void;
-}> = ({ message, onApprove, onReject, onChangeDraft }) => {
+}> = ({ message, onApprove, onReject }) => {
   const isUser = message.role === 'user';
   const showApproval = !!message.pendingAction && message.actionState !== 'approved' && message.actionState !== 'rejected';
 
@@ -451,7 +477,20 @@ const MessageBubble: React.FC<{
                   <p className="text-[11px] text-emerald-600 dark:text-emerald-400 truncate">
                     {formatCurrencyIdr(message.pendingAction.amountIdr)} · {message.pendingAction.monthYear}
                   </p>
+                  {message.actionNote && (
+                    <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 mt-0.5">
+                      {message.actionNote}
+                    </p>
+                  )}
                 </div>
+              </div>
+            )}
+
+            {/* Redirecting: Siti is being sent to PayPal's UI to approve */}
+            {message.actionState === 'redirecting' && (
+              <div className="w-full p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-950/30 flex items-center justify-center gap-3 rounded-bl-md">
+                <Loader2 className="w-5 h-5 animate-spin text-emerald-600 dark:text-emerald-400" />
+                <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Redirecting to PayPal to approve…</span>
               </div>
             )}
 
@@ -496,28 +535,13 @@ const MessageBubble: React.FC<{
                     </div>
                   )}
 
-                  {/* PayPal send amount — editable before approving */}
+                  {/* PayPal send amount — derived server-side, read-only */}
                   <div className="pt-1.5 mt-1.5 border-t border-emerald-200/60 dark:border-emerald-800/60">
-                    <div className="text-neutral-500 mb-1">Send via PayPal</div>
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        value={message.draftPaypalAmount ?? 0}
-                        onChange={(e) => onChangeDraft({ draftPaypalAmount: Number(e.target.value) })}
-                        step="0.01"
-                        min="0.01"
-                        className="flex-1 px-2 py-1 text-xs font-mono rounded-md bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                      <select
-                        value={message.draftCurrency || 'USD'}
-                        onChange={(e) => onChangeDraft({ draftCurrency: e.target.value })}
-                        className="px-2 py-1 text-xs rounded-md bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      >
-                        {CURRENCY_OPTIONS.map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
+                    <div className="text-neutral-500 mb-1">Send via PayPal (Personal Payments v2, sandbox)</div>
+                    <p className="font-mono font-semibold">
+                      USD {idrToUsdDisplay(message.pendingAction.amountIdr)} — derived from{' '}
+                      {formatCurrencyIdr(message.pendingAction.amountIdr)} at Rp 16,000/USD, display rate only
+                    </p>
                   </div>
                 </div>
 

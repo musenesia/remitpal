@@ -4,6 +4,14 @@ import { loadAppData, saveAppData } from './storage';
 const TOKEN_KEY = 'remitpal_auth_token';
 const USER_KEY = 'remitpal_auth_user';
 
+/** Display FX rate for the whole project: Rp 16,000/USD, display-only. */
+export const IDR_PER_USD = 16000;
+
+/** Derive the USD amount string (2 decimals) from an IDR total. Display rate only. */
+export function idrToUsdDisplay(amountIdr: number): string {
+  return (Number(amountIdr) / IDR_PER_USD).toFixed(2);
+}
+
 export function getStoredAuth(): { user: UserProfile | null; token: string | null } {
   try {
     const token = localStorage.getItem(TOKEN_KEY);
@@ -25,16 +33,42 @@ export function saveStoredAuth(user: UserProfile | null, token: string | null): 
   }
 }
 
-export async function fetchAppData(): Promise<{ data: AppData; fromServer: boolean }> {
+// -------------------------------------------------------------
+// Authenticated fetch — every data/sync/notification/paypal/agent
+// call goes through this so the stored Bearer token is attached.
+// On 401 it clears the stored auth and throws an error whose
+// message contains 'Unauthorized'.
+// -------------------------------------------------------------
+
+export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const { token } = getStoredAuth();
+  const headers: Record<string, string> = {
+    ...(init.headers as Record<string, string> | undefined),
+  };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(input, { ...init, headers });
+  if (res.status === 401) {
+    saveStoredAuth(null, null);
+    throw new Error('Unauthorized: session expired or invalid — please log in again.');
+  }
+  return res;
+}
+
+export async function fetchAppData(): Promise<{ data: AppData; fromServer: boolean; unauthorized?: boolean }> {
   try {
-    const res = await fetch('/api/data');
+    const res = await apiFetch('/api/data');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.data && Array.isArray(json.data.expenses)) {
       saveAppData(json.data);
       return { data: json.data, fromServer: true };
     }
-  } catch (err) {
+  } catch (err: any) {
+    // A 401 must NOT fall back silently to the local seed as if it were
+    // server data: report it so the UI can prompt login instead.
+    if (err?.message && String(err.message).includes('Unauthorized')) {
+      return { data: loadAppData(), fromServer: false, unauthorized: true };
+    }
     console.warn('[RemitPal] Server offline or unreachable, using local storage:', err);
   }
   return { data: loadAppData(), fromServer: false };
@@ -43,7 +77,7 @@ export async function fetchAppData(): Promise<{ data: AppData; fromServer: boole
 export async function syncAllData(data: AppData): Promise<boolean> {
   saveAppData(data);
   try {
-    const res = await fetch('/api/data', {
+    const res = await apiFetch('/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -57,7 +91,7 @@ export async function syncAllData(data: AppData): Promise<boolean> {
 
 export async function syncExpense(expense: ExpenseItem): Promise<void> {
   try {
-    await fetch('/api/expenses', {
+    await apiFetch('/api/expenses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(expense)
@@ -69,7 +103,7 @@ export async function syncExpense(expense: ExpenseItem): Promise<void> {
 
 export async function syncExpenseReceiptStatus(id: string, receiptStatus: ReceiptStatus, verificationNotes?: string, verifiedAt?: string): Promise<void> {
   try {
-    await fetch(`/api/expenses/${id}/receipt`, {
+    await apiFetch(`/api/expenses/${id}/receipt`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ receiptStatus, verificationNotes, verifiedAt })
@@ -81,7 +115,7 @@ export async function syncExpenseReceiptStatus(id: string, receiptStatus: Receip
 
 export async function deleteExpenseApi(id: string): Promise<void> {
   try {
-    await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
+    await apiFetch(`/api/expenses/${id}`, { method: 'DELETE' });
   } catch (err) {
     console.warn('[RemitPal Delete Expense]: Offline', err);
   }
@@ -89,7 +123,7 @@ export async function deleteExpenseApi(id: string): Promise<void> {
 
 export async function syncRemittance(record: RemittanceRecord): Promise<void> {
   try {
-    await fetch('/api/remittances', {
+    await apiFetch('/api/remittances', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(record)
@@ -101,7 +135,7 @@ export async function syncRemittance(record: RemittanceRecord): Promise<void> {
 
 export async function syncBudget(budget: MonthlyBudget): Promise<void> {
   try {
-    await fetch('/api/budgets', {
+    await apiFetch('/api/budgets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(budget)
@@ -113,7 +147,7 @@ export async function syncBudget(budget: MonthlyBudget): Promise<void> {
 
 export async function syncCalendarEvent(event: CalendarEvent): Promise<void> {
   try {
-    await fetch('/api/calendar-events', {
+    await apiFetch('/api/calendar-events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(event)
@@ -125,7 +159,7 @@ export async function syncCalendarEvent(event: CalendarEvent): Promise<void> {
 
 export async function toggleCalendarEventApi(id: string): Promise<void> {
   try {
-    await fetch(`/api/calendar-events/${id}/toggle`, { method: 'PATCH' });
+    await apiFetch(`/api/calendar-events/${id}/toggle`, { method: 'PATCH' });
   } catch (err) {
     console.warn('[RemitPal Toggle Event]: Offline', err);
   }
@@ -133,7 +167,7 @@ export async function toggleCalendarEventApi(id: string): Promise<void> {
 
 export async function deleteCalendarEventApi(id: string): Promise<void> {
   try {
-    await fetch(`/api/calendar-events/${id}`, { method: 'DELETE' });
+    await apiFetch(`/api/calendar-events/${id}`, { method: 'DELETE' });
   } catch (err) {
     console.warn('[RemitPal Delete Event]: Offline', err);
   }
@@ -141,7 +175,7 @@ export async function deleteCalendarEventApi(id: string): Promise<void> {
 
 export async function resetDatabaseApi(): Promise<AppData | null> {
   try {
-    const res = await fetch('/api/reset', { method: 'POST' });
+    const res = await apiFetch('/api/reset', { method: 'POST' });
     if (res.ok) {
       const json = await res.json();
       if (json.data) {
@@ -210,7 +244,7 @@ export async function logoutApi(token: string | null): Promise<void> {
 
 export async function fetchNotifications(): Promise<AppNotification[]> {
   try {
-    const res = await fetch('/api/notifications');
+    const res = await apiFetch('/api/notifications');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.notifications && Array.isArray(json.notifications)) {
@@ -224,7 +258,7 @@ export async function fetchNotifications(): Promise<AppNotification[]> {
 
 export async function markNotificationReadApi(id: string): Promise<void> {
   try {
-    await fetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
+    await apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
   } catch (err) {
     console.warn('[RemitPal Mark Read]: Offline', err);
   }
@@ -232,7 +266,7 @@ export async function markNotificationReadApi(id: string): Promise<void> {
 
 export async function markAllNotificationsReadApi(): Promise<void> {
   try {
-    await fetch('/api/notifications/read-all', { method: 'POST' });
+    await apiFetch('/api/notifications/read-all', { method: 'POST' });
   } catch (err) {
     console.warn('[RemitPal Mark All Read]: Offline', err);
   }
@@ -240,7 +274,7 @@ export async function markAllNotificationsReadApi(): Promise<void> {
 
 export async function deleteNotificationApi(id: string): Promise<void> {
   try {
-    await fetch(`/api/notifications/${id}`, { method: 'DELETE' });
+    await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' });
   } catch (err) {
     console.warn('[RemitPal Delete Notification]: Offline', err);
   }
@@ -256,9 +290,10 @@ export interface ServiceStatus {
 }
 
 /**
- * Fetch the real-vs-mock configuration of the Gemini agent and PayPal payouts.
- * Used to render LIVE / MOCK badges so it's obvious the app uses real services.
- * Never exposes secrets — only booleans, the model name, and the PayPal env.
+ * Fetch the real-vs-mock configuration of the Gemini agent and PayPal
+ * Personal Payments. Used to render LIVE / MOCK badges so it's obvious
+ * the app uses real services. Never exposes secrets — only booleans,
+ * the model name, and the PayPal env.
  */
 export async function fetchServiceStatus(): Promise<ServiceStatus | null> {
   try {
@@ -272,69 +307,172 @@ export async function fetchServiceStatus(): Promise<ServiceStatus | null> {
 }
 
 // -------------------------------------------------------------
-// PayPal Payouts Client (Siti -> Slamet)
+// PayPal Personal Payments v2 Client (sandbox only, Siti -> Slamet)
 // -------------------------------------------------------------
+// Flow: create token (server derives USD from the approved IDR total) ->
+// store the pending transfer in sessionStorage -> redirect Siti to
+// PayPal's UI -> PayPal returns with ?status=...&transactionId=... ->
+// look the token up -> a ledger record is created ONLY when the token
+// lookup says COMPLETED (or SUCCESS) AND a transactionId is present.
 
-export interface PayPalPayoutResponse {
-  success: boolean;
-  payout?: {
-    payoutBatchId: string;
-    batchStatus: string;
-    transactionStatus?: string;
-    amount?: { value: string; currency: string };
-    mock: boolean;
-  };
-  error?: string;
+export interface PersonalPaymentTokenResult {
+  tokenId: string;
+  status: string;
+  initiatePaymentUrl: string | null;
+  amount: string;
+  currency: string;
+  receiverEmail: string;
+  mock: boolean;
 }
 
-export interface PayPalStatusResponse {
+export interface PersonalPaymentTokenStatus {
+  status: string | null;
+  transactionId: string | null;
+  amount: string | number | null;
+  currency: string | null;
+  tokenId?: string;
+  mock?: boolean;
+}
+
+export interface CreatePersonalPaymentTokenResult {
   success: boolean;
-  batchStatus?: string;
-  transactionStatus?: string;
+  token?: PersonalPaymentTokenResult;
   error?: string;
 }
 
 /**
- * Trigger a real PayPal payout to Slamet.
- * The amount is sent in `currency`. The remittance ledger record is built
- * client-side from the returned payout result and persisted via the normal
- * remittance flow. Requires the logged-in remitter's token (from local storage).
+ * Create a Personal Payments v2 token on the server. The USD amount is
+ * derived server-side from amountIdr at Rp 16,000/USD — the client never
+ * supplies the amount PayPal sees. The caller must store the pending
+ * transfer (savePendingPersonalPayment) BEFORE redirecting the user to
+ * initiatePaymentUrl — PayPal's return carries no token id.
+ * In mock mode the token is a MOCK token with no URL: do NOT redirect.
  */
-export async function sendPayPalPayout(params: {
-  amount: number;
-  currency: string;
+export async function createPersonalPaymentToken(params: {
+  amountIdr: number;
+  externalReferenceId: string;
   note?: string;
-}): Promise<PayPalPayoutResponse> {
-  const { token } = getStoredAuth();
+  returnUrl: string;
+}): Promise<CreatePersonalPaymentTokenResult> {
   try {
-    const res = await fetch('/api/paypal/send', {
+    const res = await apiFetch('/api/paypal/personal-payments/tokens', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
     const data = await res.json();
-    if (!res.ok) return { success: false, error: data.error || 'PayPal payout failed.' };
-    return data as PayPalPayoutResponse;
+    if (!res.ok) return { success: false, error: data.error || 'PayPal token creation failed.' };
+    return { success: true, token: data.token as PersonalPaymentTokenResult };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Network error during PayPal payout.' };
+    return { success: false, error: err.message || 'Network error creating PayPal token.' };
   }
 }
 
-/** Refresh the status of a payout that may still have been PENDING/PROCESSING. */
-export async function checkPayPalPayoutStatus(payoutBatchId: string): Promise<PayPalStatusResponse> {
-  const { token } = getStoredAuth();
+export interface GetPersonalPaymentTokenResult {
+  success: boolean;
+  status?: PersonalPaymentTokenStatus;
+  error?: string;
+}
+
+/** Look up a Personal Payments token after the PayPal return. Never invents a transaction id. */
+export async function getPersonalPaymentToken(tokenId: string): Promise<GetPersonalPaymentTokenResult> {
   try {
-    const res = await fetch(`/api/paypal/status/${payoutBatchId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    const res = await apiFetch(`/api/paypal/personal-payments/tokens/${encodeURIComponent(tokenId)}`);
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error || 'Token lookup failed.' };
+    return {
+      success: true,
+      status: {
+        status: data.status ?? null,
+        transactionId: data.transactionId ?? null,
+        amount: data.amount ?? null,
+        currency: data.currency ?? null,
+        tokenId: data.tokenId ?? tokenId,
+        mock: data.mock ?? false,
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error looking up PayPal token.' };
+  }
+}
+
+export interface RecordManualPersonalPaymentResult {
+  success: boolean;
+  referenceNo?: string;
+  mock?: boolean;
+  error?: string;
+}
+
+/**
+ * DEMO MODE manual record (mock only). Returns a MOCK reference number;
+ * it does NOT create a remittance record — the caller builds the record
+ * and labels it MOCK. Fails unless the server runs with PAYPAL_MOCK=true.
+ */
+export async function recordManualPersonalPayment(params: {
+  amountIdr: number;
+  monthYear: string;
+  allocations: Record<string, number>;
+  note?: string;
+}): Promise<RecordManualPersonalPaymentResult> {
+  try {
+    const res = await apiFetch('/api/paypal/personal-payments/manual-record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
     });
     const data = await res.json();
-    if (!res.ok) return { success: false, error: data.error || 'Status check failed.' };
-    return data as PayPalStatusResponse;
+    if (!res.ok) return { success: false, error: data.error || 'Manual record failed.' };
+    return { success: true, referenceNo: data.referenceNo, mock: data.mock };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Network error during status check.' };
+    return { success: false, error: err.message || 'Network error recording manual payment.' };
+  }
+}
+
+// -------------------------------------------------------------
+// Pending Personal Payment (sessionStorage)
+// -------------------------------------------------------------
+// PayPal's return carries only status + transactionId, NOT the token id,
+// so the pending transfer must be stored BEFORE redirecting to PayPal.
+
+export interface PendingPersonalPayment {
+  tokenId: string;
+  amountIdr: number;
+  monthYear: string;
+  allocations: Record<string, number>;
+  note: string;
+  amountUsd: string;
+  currency: 'USD';
+  source: 'chat' | 'tracker';
+}
+
+const PENDING_PERSONAL_PAYMENT_KEY = 'remitpal_pending_personal_payment';
+
+export function savePendingPersonalPayment(pending: PendingPersonalPayment): void {
+  try {
+    sessionStorage.setItem(PENDING_PERSONAL_PAYMENT_KEY, JSON.stringify(pending));
+  } catch {
+    // sessionStorage unavailable: the redirect still proceeds, but the
+    // return check will report no pending payment and create no record.
+  }
+}
+
+export function loadPendingPersonalPayment(): PendingPersonalPayment | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_PERSONAL_PAYMENT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.tokenId || !parsed.amountIdr) return null;
+    return parsed as PendingPersonalPayment;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingPersonalPayment(): void {
+  try {
+    sessionStorage.removeItem(PENDING_PERSONAL_PAYMENT_KEY);
+  } catch {
+    // ignore
   }
 }
 
@@ -372,22 +510,18 @@ export interface AgentHistoryTurn {
 
 /**
  * Send a message (and optional receipt image) to the role-aware AI agent.
- * Requires the logged-in user's token; a missing token returns a 401 the UI
- * uses to prompt login.
+ * Requires the logged-in user's token; a missing/expired token returns a
+ * 401 the UI uses to prompt login.
  */
 export async function sendAgentMessage(params: {
   message: string;
   image?: { data: string; mimeType: string };
   history: AgentHistoryTurn[];
 }): Promise<AgentChatResponse> {
-  const { token } = getStoredAuth();
   try {
-    const res = await fetch('/api/agent/chat', {
+    const res = await apiFetch('/api/agent/chat', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
     const data = await res.json();
@@ -397,4 +531,3 @@ export async function sendAgentMessage(params: {
     return { success: false, error: err.message || 'Network error contacting the agent.' };
   }
 }
-
