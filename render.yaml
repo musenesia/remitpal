@@ -1,0 +1,27 @@
+# Render Blueprint for Amanah Remit — Migrant Worker Expense Tracker
+# Deploy with: render blueprint deploy (or via Render Dashboard > New > Blueprint)
+
+databases:
+  - name: amanah-db
+    plan: free
+    ipAllowList: []   # Allow connections from Render services only
+
+services:
+  - type: web
+    name: amanah-remit
+    env: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /api/auth/users
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: amanah-db
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false   # Set this manually in the Render dashboard
+      - key: APP_URL
+        sync: false   # Set this to your Render service URL after first deploy

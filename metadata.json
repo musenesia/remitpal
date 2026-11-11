@@ -1,0 +1,6 @@
+{
+  "name": "RemitPal - Migrant Worker Expense Tracker",
+  "description": "Offline bento-style expense and remittance tracker for Indonesian migrant workers in Hong Kong sending money to Indramayu. Tracks home renovation, school tuition, allowances, savings, and receipt verification with multi-language support and export options.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,486 @@
+import { AppData } from '../types';
+
+export const INITIAL_DATA: AppData = {
+  version: 1,
+  workerProfile: {
+    name: "Siti Rahayu",
+    location: "Causeway Bay, Hong Kong (HKD)",
+    destination: "Desa Karangampel, Indramayu, Jawa Barat (IDR)",
+    jobTitle: "Elderly Care Assistant & Domestic Provider",
+    monthlyTargetIdr: 15000000,
+    husbandName: "Slamet Widodo",
+    childrenNames: ["Rizky Pratama (14 yo, SMP)", "Alya Putri (10 yo, SD)"],
+    avatarUrl: "/src/assets/images/worker_profile_avatar_1794285313427.jpg"
+  },
+  budgets: [
+    {
+      monthYear: "2026-11",
+      totalRemittancePlanned: 15000000,
+      allocations: {
+        renovation: 5000000,
+        tuition: 3500000,
+        allowance: 4000000,
+        savings: 2500000,
+        miscellaneous: 0
+      },
+      notes: "Focus this month: Tiling front porch terrace and Rizky's semester exam fee."
+    },
+    {
+      monthYear: "2026-10",
+      totalRemittancePlanned: 15000000,
+      allocations: {
+        renovation: 5500000,
+        tuition: 3000000,
+        allowance: 4000000,
+        savings: 2500000,
+        miscellaneous: 0
+      },
+      notes: "Purchased terracotta roof tiles and cement sacks."
+    },
+    {
+      monthYear: "2026-09",
+      totalRemittancePlanned: 15000000,
+      allocations: {
+        renovation: 6000000,
+        tuition: 2500000,
+        allowance: 4000000,
+        savings: 2500000,
+        miscellaneous: 0
+      },
+      notes: "Mason foundation work and bedroom wall plastering."
+    }
+  ],
+  remittances: [
+    {
+      id: "rem-2026-11",
+      date: "2026-11-02",
+      monthYear: "2026-11",
+      amountIdr: 15000000,
+      amountHkd: 7520,
+      transferService: "BRI Remittance Hong Kong",
+      sender: "Siti Rahayu (HK)",
+      receiver: "Slamet Widodo (BRI Indramayu)",
+      referenceNo: "HKBR2611029841",
+      notes: "November salary remittance sent right after payday.",
+      status: "received"
+    },
+    {
+      id: "rem-2026-10",
+      date: "2026-10-02",
+      monthYear: "2026-10",
+      amountIdr: 15000000,
+      amountHkd: 7510,
+      transferService: "Bank Mandiri Remittance HK",
+      sender: "Siti Rahayu (HK)",
+      receiver: "Slamet Widodo (Mandiri Indramayu)",
+      referenceNo: "HKMD2610028120",
+      notes: "October transfer received intact.",
+      status: "received"
+    },
+    {
+      id: "rem-2026-09",
+      date: "2026-09-02",
+      monthYear: "2026-09",
+      amountIdr: 15000000,
+      amountHkd: 7490,
+      transferService: "BRI Remittance Hong Kong",
+      sender: "Siti Rahayu (HK)",
+      receiver: "Slamet Widodo (BRI Indramayu)",
+      referenceNo: "HKBR2609021455",
+      notes: "September transfer successfully deposited.",
+      status: "received"
+    }
+  ],
+  expenses: [
+    // --- November 2026 ---
+    {
+      id: "exp-nov-01",
+      date: "2026-11-04",
+      monthYear: "2026-11",
+      categoryId: "renovation",
+      title: "Granite Floor Tiles (30 boxes) & Tile Grout",
+      amountIdr: 2850000,
+      vendor: "TB. Rejeki Abadi Karangampel",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Receipt checked on WhatsApp video call. Tile quality approved.",
+      verifiedAt: "2026-11-04"
+    },
+    {
+      id: "exp-nov-02",
+      date: "2026-11-05",
+      monthYear: "2026-11",
+      categoryId: "renovation",
+      title: "Weekly Wage for 2 Masons (Pak Karyo & helper)",
+      amountIdr: 1400000,
+      vendor: "Tukang Bangunan Pak Karyo",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Signed payment slip received with work log photo.",
+      verifiedAt: "2026-11-05"
+    },
+    {
+      id: "exp-nov-03",
+      date: "2026-11-03",
+      monthYear: "2026-11",
+      categoryId: "tuition",
+      title: "Rizky's SMP Tuition (SPP) & Exam Registration",
+      amountIdr: 1650000,
+      vendor: "SMP Negeri 1 Karangampel",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "School bank transfer receipt with stamp verified.",
+      verifiedAt: "2026-11-03"
+    },
+    {
+      id: "exp-nov-04",
+      date: "2026-11-06",
+      monthYear: "2026-11",
+      categoryId: "tuition",
+      title: "Alya's Elementary Books & Uniform Replacement",
+      amountIdr: 850000,
+      vendor: "Toko Buku & Seragam Sahabat",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Itemized receipt confirmed.",
+      verifiedAt: "2026-11-06"
+    },
+    {
+      id: "exp-nov-05",
+      date: "2026-11-03",
+      monthYear: "2026-11",
+      categoryId: "allowance",
+      title: "Monthly Grocery Staple (Rice 50kg, Cooking Oil, Eggs)",
+      amountIdr: 1750000,
+      vendor: "Warung Sembako Bu Eko",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Monthly staples matched previous monthly rate.",
+      verifiedAt: "2026-11-03"
+    },
+    {
+      id: "exp-nov-06",
+      date: "2026-11-04",
+      monthYear: "2026-11",
+      categoryId: "allowance",
+      title: "Electricity Token (PLN) & PDAM Water Bill",
+      amountIdr: 550000,
+      vendor: "Indomaret Karangampel",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "PLN token printed slip verified.",
+      verifiedAt: "2026-11-04"
+    },
+    {
+      id: "exp-nov-07",
+      date: "2026-11-07",
+      monthYear: "2026-11",
+      categoryId: "savings",
+      title: "Automatic Deposit to Family Bank Account",
+      amountIdr: 2500000,
+      vendor: "Bank BRI Unit Karangampel",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Bank passbook print photo verified by Siti.",
+      verifiedAt: "2026-11-07"
+    },
+    {
+      id: "exp-nov-08",
+      date: "2026-11-08",
+      monthYear: "2026-11",
+      categoryId: "renovation",
+      title: "Wood Sealant, Paint & Roller Brushes",
+      amountIdr: 650000,
+      vendor: "Toko Cat Warna Indah",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "",
+      receiptStatus: "pending",
+      verificationNotes: "Slamet to upload purchase photo tomorrow morning.",
+      verifiedAt: undefined
+    },
+
+    // --- October 2026 ---
+    {
+      id: "exp-oct-01",
+      date: "2026-10-05",
+      monthYear: "2026-10",
+      categoryId: "renovation",
+      title: "Terracotta Roof Tiles (800 pcs) & Ridge Caps",
+      amountIdr: 3400000,
+      vendor: "Pabrik Genteng Jatiwangi Indramayu",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Delivered to home and verified via photo.",
+      verifiedAt: "2026-10-06"
+    },
+    {
+      id: "exp-oct-02",
+      date: "2026-10-12",
+      monthYear: "2026-10",
+      categoryId: "renovation",
+      title: "Mason Wages (Roof Installation & Timber Struts)",
+      amountIdr: 1800000,
+      vendor: "Tukang Pak Karyo",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Full week completion signed.",
+      verifiedAt: "2026-10-13"
+    },
+    {
+      id: "exp-oct-03",
+      date: "2026-10-04",
+      monthYear: "2026-10",
+      categoryId: "tuition",
+      title: "Monthly School Tuition & Science Lab Fee",
+      amountIdr: 2100000,
+      vendor: "SMP & SD Indramayu",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Official receipt from school treasurer.",
+      verifiedAt: "2026-10-05"
+    },
+    {
+      id: "exp-oct-04",
+      date: "2026-10-04",
+      monthYear: "2026-10",
+      categoryId: "allowance",
+      title: "Monthly Household Allowances & Wet Market",
+      amountIdr: 3800000,
+      vendor: "Pasar Tradisional Karangampel",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Approved monthly family provisions.",
+      verifiedAt: "2026-10-05"
+    },
+    {
+      id: "exp-oct-05",
+      date: "2026-10-07",
+      monthYear: "2026-10",
+      categoryId: "savings",
+      title: "Family Bank Savings Deposit",
+      amountIdr: 2500000,
+      vendor: "Bank BRI Unit Karangampel",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Bank receipt confirmed.",
+      verifiedAt: "2026-10-07"
+    },
+
+    // --- September 2026 ---
+    {
+      id: "exp-sep-01",
+      date: "2026-09-06",
+      monthYear: "2026-09",
+      categoryId: "renovation",
+      title: "Red Bricks, Cement Sacks (25) & River Sand",
+      amountIdr: 3900000,
+      vendor: "TB. Rejeki Abadi",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Delivery slip signed.",
+      verifiedAt: "2026-09-06"
+    },
+    {
+      id: "exp-sep-02",
+      date: "2026-09-14",
+      monthYear: "2026-09",
+      categoryId: "renovation",
+      title: "Labor Wages Foundation & Wall Plastering",
+      amountIdr: 1950000,
+      vendor: "Tukang Pak Karyo",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Weekly wages signed slip.",
+      verifiedAt: "2026-09-15"
+    },
+    {
+      id: "exp-sep-03",
+      date: "2026-09-04",
+      monthYear: "2026-09",
+      categoryId: "tuition",
+      title: "School Term Fee & After-School Math Tutoring",
+      amountIdr: 2200000,
+      vendor: "Bimbel & SMP Karangampel",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Tutoring card signed.",
+      verifiedAt: "2026-09-04"
+    },
+    {
+      id: "exp-sep-04",
+      date: "2026-09-05",
+      monthYear: "2026-09",
+      categoryId: "allowance",
+      title: "Family Groceries & Utility Bills",
+      amountIdr: 3750000,
+      vendor: "Warung Bu Eko & PLN",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Approved monthly family provisions.",
+      verifiedAt: "2026-09-05"
+    },
+    {
+      id: "exp-sep-05",
+      date: "2026-09-07",
+      monthYear: "2026-09",
+      categoryId: "savings",
+      title: "Family Bank Savings Deposit",
+      amountIdr: 2500000,
+      vendor: "Bank BRI Unit Karangampel",
+      paidBy: "Slamet Widodo",
+      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptStatus: "verified",
+      verificationNotes: "Bank print verified.",
+      verifiedAt: "2026-09-07"
+    }
+  ],
+  calendarEvents: [
+    {
+      id: "evt-nov-01",
+      title: "Monthly Salary Remittance (15,000,000 IDR)",
+      date: "2026-11-02",
+      time: "10:30",
+      type: "remittance",
+      priority: "high",
+      isCompleted: true,
+      assignedTo: "Siti Rahayu (HK)",
+      estimatedAmountIdr: 15000000,
+      notes: "Transferred via BRI Remittance Causeway Bay immediately after salary payday."
+    },
+    {
+      id: "evt-nov-02",
+      title: "Pay Rizky's SMP Tuition & Exam Fee",
+      date: "2026-11-03",
+      time: "09:00",
+      type: "tuition",
+      priority: "high",
+      isCompleted: true,
+      assignedTo: "Slamet Widodo",
+      estimatedAmountIdr: 1650000,
+      notes: "School bank transfer receipt with stamp obtained."
+    },
+    {
+      id: "evt-nov-03",
+      title: "Order 30 Boxes Granite Floor Tiles & Sand",
+      date: "2026-11-04",
+      time: "14:00",
+      type: "renovation",
+      priority: "medium",
+      isCompleted: true,
+      assignedTo: "Slamet Widodo",
+      estimatedAmountIdr: 2850000,
+      notes: "Delivered to house site by TB Rejeki Abadi."
+    },
+    {
+      id: "evt-nov-04",
+      title: "Deposit Monthly Emergency Fund to Bank BRI",
+      date: "2026-11-07",
+      time: "11:00",
+      type: "savings",
+      priority: "high",
+      isCompleted: true,
+      assignedTo: "Slamet Widodo",
+      estimatedAmountIdr: 2500000,
+      notes: "Deposited into family account, passbook photo sent to Siti."
+    },
+    {
+      id: "evt-nov-05",
+      title: "Pay Weekly Wage for 2 Masons (Pak Karyo & helper)",
+      date: "2026-11-11",
+      time: "16:00",
+      type: "renovation",
+      priority: "high",
+      isCompleted: false,
+      assignedTo: "Slamet Widodo",
+      estimatedAmountIdr: 1400000,
+      notes: "Cash payment on Friday evening after work completion."
+    },
+    {
+      id: "evt-nov-06",
+      title: "Alya's Elementary Science Project Supplies",
+      date: "2026-11-14",
+      time: "10:00",
+      type: "tuition",
+      priority: "medium",
+      isCompleted: false,
+      assignedTo: "Slamet Widodo",
+      estimatedAmountIdr: 250000,
+      notes: "Buy drawing paper, colored pencils, and model kit at stationary shop."
+    },
+    {
+      id: "evt-nov-07",
+      title: "WhatsApp Video Call: Inspect Porch Tiling Progress",
+      date: "2026-11-15",
+      time: "20:00",
+      type: "task",
+      priority: "medium",
+      isCompleted: false,
+      assignedTo: "Siti Rahayu & Slamet",
+      notes: "Weekly family video call to inspect terrace floor tiles and kid's homework."
+    },
+    {
+      id: "evt-nov-08",
+      title: "Restock Cooking Gas LPG 3kg & Groceries",
+      date: "2026-11-18",
+      time: "08:30",
+      type: "allowance",
+      priority: "low",
+      isCompleted: false,
+      assignedTo: "Slamet Widodo",
+      estimatedAmountIdr: 350000,
+      notes: "Local warung sembako monthly restock."
+    },
+    {
+      id: "evt-nov-09",
+      title: "Wood Sealant & Front Porch Pillar Painting",
+      date: "2026-11-20",
+      time: "13:00",
+      type: "renovation",
+      priority: "medium",
+      isCompleted: false,
+      assignedTo: "Slamet Widodo",
+      estimatedAmountIdr: 650000,
+      notes: "Second coat of weather-resistant paint."
+    },
+    {
+      id: "evt-nov-10",
+      title: "Pay PLN Electricity Token & PDAM Water",
+      date: "2026-11-28",
+      time: "09:00",
+      type: "allowance",
+      priority: "high",
+      isCompleted: false,
+      assignedTo: "Slamet Widodo",
+      estimatedAmountIdr: 550000,
+      notes: "Pay before month-end cutoff."
+    },
+    {
+      id: "evt-dec-01",
+      title: "Next Scheduled Monthly Remittance (15,000,000 IDR)",
+      date: "2026-12-02",
+      time: "10:00",
+      type: "remittance",
+      priority: "high",
+      isCompleted: false,
+      assignedTo: "Siti Rahayu (HK)",
+      estimatedAmountIdr: 15000000,
+      notes: "December salary transfer to Indramayu via Bank BRI HK."
+    }
+  ]
+};
