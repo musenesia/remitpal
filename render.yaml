@@ -13,7 +13,7 @@ services:
     plan: free
     buildCommand: npm run build
     startCommand: npm start
-    healthCheckPath: /api/auth/users
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -25,3 +25,9 @@ services:
         sync: false   # Set this manually in the Render dashboard
       - key: APP_URL
         sync: false   # Set this to your Render service URL after first deploy
+      - key: PAYPAL_CLIENT_ID
+        sync: false   # PayPal sandbox REST app client ID
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false   # PayPal sandbox REST app secret
+      - key: PAYPAL_RECIPIENT_EMAIL
+        sync: false   # Slamet's sandbox personal PayPal account email
