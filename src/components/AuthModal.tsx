@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Lock, UserCheck, ShieldCheck, Database, KeyRound, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { X, Lock, Database, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { UserProfile } from '../types';
 import { loginApi } from '../utils/api';
 
@@ -51,12 +51,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     handleLogin(username.trim(), password);
   };
 
-  const handleQuickLogin = (uname: string, pword: string) => {
-    setUsername(uname);
-    setPassword(pword);
-    handleLogin(uname, pword);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div 
@@ -88,98 +82,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Quick Preset Selector */}
-          <div>
-            <div className="flex items-center justify-between mb-2.5">
-              <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
-                Quick Select Account
-              </span>
-              <span className="text-[11px] text-neutral-400 font-mono">
-                Click to log in instantly
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Card 1: Siti Rahayu */}
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('siti', 'siti123')}
-                disabled={isLoading}
-                className={`p-3.5 rounded-xl border text-left transition-all relative group flex flex-col justify-between ${
-                  currentUser?.username === 'siti'
-                    ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20 ring-2 ring-emerald-500/20'
-                    : 'border-neutral-200 dark:border-neutral-800 hover:border-emerald-400 dark:hover:border-emerald-600 bg-neutral-50/50 dark:bg-neutral-800/40'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
-                      Remitter · HK
-                    </span>
-                    {currentUser?.username === 'siti' && (
-                      <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                        <UserCheck className="w-3.5 h-3.5" />
-                        Active
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 mt-2">
-                    Siti Rahayu
-                  </h3>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                    Causeway Bay, Hong Kong
-                  </p>
-                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-2">
-                    Sends 15M IDR/mo & verifies receipts
-                  </p>
-                </div>
-
-                <div className="mt-3 pt-2 border-t border-neutral-200/60 dark:border-neutral-700/60 flex items-center justify-between text-[11px]">
-                  <span className="font-mono text-neutral-400">siti / siti123</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-neutral-400 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all" />
-                </div>
-              </button>
-
-              {/* Card 2: Slamet Widodo */}
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('slamet', 'slamet123')}
-                disabled={isLoading}
-                className={`p-3.5 rounded-xl border text-left transition-all relative group flex flex-col justify-between ${
-                  currentUser?.username === 'slamet'
-                    ? 'border-sky-500 bg-sky-50/50 dark:bg-sky-950/20 ring-2 ring-sky-500/20'
-                    : 'border-neutral-200 dark:border-neutral-800 hover:border-sky-400 dark:hover:border-sky-600 bg-neutral-50/50 dark:bg-neutral-800/40'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-sky-100 dark:bg-sky-900/60 text-sky-800 dark:text-sky-300">
-                      Manager · Indramayu
-                    </span>
-                    {currentUser?.username === 'slamet' && (
-                      <span className="flex items-center gap-1 text-[11px] font-medium text-sky-600 dark:text-sky-400">
-                        <UserCheck className="w-3.5 h-3.5" />
-                        Active
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 mt-2">
-                    Slamet Widodo
-                  </h3>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                    Karangampel, Indramayu
-                  </p>
-                  <p className="text-[11px] text-sky-600 dark:text-sky-400 mt-2">
-                    Manages renovation & uploads proofs
-                  </p>
-                </div>
-
-                <div className="mt-3 pt-2 border-t border-neutral-200/60 dark:border-neutral-700/60 flex items-center justify-between text-[11px]">
-                  <span className="font-mono text-neutral-400">slamet / slamet123</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-neutral-400 group-hover:text-sky-600 group-hover:translate-x-0.5 transition-all" />
-                </div>
-              </button>
-            </div>
+          {/* Demo accounts — no passwords are printed here or anywhere in the repo. */}
+          <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700/60 text-xs text-neutral-600 dark:text-neutral-400">
+            Demo accounts: <span className="font-mono font-semibold text-neutral-800 dark:text-neutral-200">siti</span> (remitter) and{' '}
+            <span className="font-mono font-semibold text-neutral-800 dark:text-neutral-200">slamet</span> (manager) — credentials are in the
+            Devpost testing instructions.
           </div>
 
           <div className="relative flex items-center justify-center">
@@ -218,16 +125,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
                   Password
                 </label>
-                <span className="text-[11px] text-neutral-400">
-                  Default: username + 123
-                </span>
               </div>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Enter your password"
                   className="w-full px-3.5 py-2 text-sm rounded-lg bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-neutral-900 dark:text-neutral-100 pr-10"
                 />
                 <button

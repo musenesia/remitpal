@@ -156,11 +156,18 @@ async function seedUsersIfEmpty() {
   const userCount = parseInt(result.rows[0].count, 10);
 
   if (userCount === 0) {
+    // Demo seed passwords come from env when set; the defaults below are
+    // DEMO-ONLY and must be overridden via env on any shared deploy.
+    // NOTE: seeding only runs when the users table is empty, so changing
+    // these env vars later does NOT change existing passwords.
+    const sitiPassword = process.env.SEED_SITI_PASSWORD || 'siti123';
+    const slametPassword = process.env.SEED_SLAMET_PASSWORD || 'slamet123';
+
     const sitiSalt = generateSalt();
-    const sitiHash = hashPassword('siti123', sitiSalt);
+    const sitiHash = hashPassword(sitiPassword, sitiSalt);
 
     const slametSalt = generateSalt();
-    const slametHash = hashPassword('slamet123', slametSalt);
+    const slametHash = hashPassword(slametPassword, slametSalt);
 
     const insertUser = `
       INSERT INTO users (id, username, email, password_hash, salt, name, role, location, avatar_url, phone, created_at)
@@ -195,7 +202,7 @@ async function seedUsersIfEmpty() {
       new Date().toISOString()
     ]);
 
-    console.log('[PostgreSQL] Seeded users: siti (siti123) and slamet (slamet123)');
+    console.log('[PostgreSQL] Seeded demo users: siti and slamet (demo-only default passwords — override via SEED_SITI_PASSWORD / SEED_SLAMET_PASSWORD on any shared deploy)');
   }
 }
 

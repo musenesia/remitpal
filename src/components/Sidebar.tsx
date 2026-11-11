@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { ActiveTab, AppData, UserProfile } from '../types';
 import { Translations } from '../i18n/translations';
+import { ServiceStatus } from '../utils/api';
 
 interface SidebarProps {
   currentTab: ActiveTab;
@@ -33,6 +34,7 @@ interface SidebarProps {
   onLogout: () => void;
   isDbConnected: boolean;
   unreadNotificationsCount?: number;
+  serviceStatus: ServiceStatus | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -49,9 +51,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAuthModal,
   onLogout,
   isDbConnected,
-  unreadNotificationsCount
+  unreadNotificationsCount,
+  serviceStatus
 }) => {
   const pendingTasksCount = data.calendarEvents ? data.calendarEvents.filter(e => !e.isCompleted).length : 0;
+
+  // Integration badges reflect the live /api/status response — never hardcoded.
+  // Gemini: LIVE only when enabled and not mock; MOCK when the mock agent runs; OFF otherwise.
+  // PayPal: LIVE (sandbox) only when configured and not mock; MOCK in demo mode; OFF otherwise.
+  type BadgeTone = 'live' | 'mock' | 'off';
+  const geminiBadge: { label: string; tone: BadgeTone } = !serviceStatus
+    ? { label: 'Gemini · OFF', tone: 'off' }
+    : serviceStatus.agent.mock
+    ? { label: 'Gemini · MOCK', tone: 'mock' }
+    : serviceStatus.agent.enabled
+    ? { label: 'Gemini · LIVE', tone: 'live' }
+    : { label: 'Gemini · OFF', tone: 'off' };
+  const paypalBadge: { label: string; tone: BadgeTone } = !serviceStatus
+    ? { label: 'PayPal · OFF', tone: 'off' }
+    : serviceStatus.paypal.mock
+    ? { label: 'PayPal · MOCK', tone: 'mock' }
+    : serviceStatus.paypal.configured
+    ? { label: 'PayPal · LIVE (sandbox)', tone: 'live' }
+    : { label: 'PayPal · OFF', tone: 'off' };
+  const badgeStyles: Record<BadgeTone, { box: string; text: string; dot: string }> = {
+    live: {
+      box: 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200/60 dark:border-emerald-800/60',
+      text: 'text-emerald-700 dark:text-emerald-300',
+      dot: 'bg-emerald-500',
+    },
+    mock: {
+      box: 'bg-amber-50 dark:bg-amber-950/40 border-amber-200/60 dark:border-amber-800/60',
+      text: 'text-amber-700 dark:text-amber-300',
+      dot: 'bg-amber-500',
+    },
+    off: {
+      box: 'bg-neutral-50 dark:bg-neutral-800/60 border-neutral-200/60 dark:border-neutral-700/60',
+      text: 'text-neutral-500 dark:text-neutral-400',
+      dot: 'bg-neutral-400',
+    },
+  };
 
   const navItems: { id: ActiveTab; label: string; icon: React.ReactNode; badgeCount?: number }[] = [
     { id: 'overview', label: t.nav.overview, icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -256,15 +295,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Footer Controls: Theme, Live Badges & Storage indicator */}
         <div className="p-4 border-t border-neutral-100 dark:border-neutral-800 space-y-3">
-          {/* Live Integration Badges */}
+          {/* Live Integration Badges (from /api/status — never hardcoded) */}
           <div className="flex items-center gap-2">
-            <div className="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/60">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 truncate">Gemini · LIVE</span>
+            <div className={`flex-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${badgeStyles[geminiBadge.tone].box}`}>
+              <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${badgeStyles[geminiBadge.tone].dot}`} />
+              <span className={`text-[11px] font-semibold truncate ${badgeStyles[geminiBadge.tone].text}`}>{geminiBadge.label}</span>
             </div>
-            <div className="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-800/60">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
-              <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 truncate">PayPal · LIVE</span>
+            <div className={`flex-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${badgeStyles[paypalBadge.tone].box}`}>
+              <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${badgeStyles[paypalBadge.tone].dot}`} />
+              <span className={`text-[11px] font-semibold truncate ${badgeStyles[paypalBadge.tone].text}`}>{paypalBadge.label}</span>
             </div>
           </div>
 
