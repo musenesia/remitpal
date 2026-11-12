@@ -10,7 +10,7 @@ export const INITIAL_DATA: AppData = {
     monthlyTargetIdr: 15000000,
     husbandName: "Slamet Widodo",
     childrenNames: ["Rizky Pratama (14 yo, SMP)", "Alya Putri (10 yo, SD)"],
-    avatarUrl: "/src/assets/images/worker_profile_avatar_1794285313427.jpg"
+    avatarUrl: "/images/worker_profile_avatar_1794285313427.jpg"
   },
   budgets: [
     {
@@ -102,7 +102,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 2850000,
       vendor: "TB. Rejeki Abadi Karangampel",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Receipt checked via video call. Tile quality approved.",
       verifiedAt: "2026-11-04"
@@ -116,7 +116,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 1400000,
       vendor: "Tukang Bangunan Pak Karyo",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Signed payment slip received with work log photo.",
       verifiedAt: "2026-11-05"
@@ -130,7 +130,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 1650000,
       vendor: "SMP Negeri 1 Karangampel",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Official school receipt with stamp verified.",
       verifiedAt: "2026-11-03"
@@ -144,7 +144,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 850000,
       vendor: "Toko Buku & Seragam Sahabat",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Itemized receipt confirmed.",
       verifiedAt: "2026-11-06"
@@ -158,7 +158,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 1750000,
       vendor: "Warung Sembako Bu Eko",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Monthly staples matched previous monthly rate.",
       verifiedAt: "2026-11-03"
@@ -172,7 +172,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 550000,
       vendor: "Indomaret Karangampel",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "PLN token printed slip verified.",
       verifiedAt: "2026-11-04"
@@ -186,7 +186,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 2500000,
       vendor: "PayPal",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "PayPal transfer confirmation screenshot verified by Siti.",
       verifiedAt: "2026-11-07"
@@ -216,7 +216,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 3400000,
       vendor: "Pabrik Genteng Jatiwangi Indramayu",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Delivered to home and verified via photo.",
       verifiedAt: "2026-10-06"
@@ -230,7 +230,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 1800000,
       vendor: "Tukang Pak Karyo",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Full week completion signed.",
       verifiedAt: "2026-10-13"
@@ -244,7 +244,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 2100000,
       vendor: "SMP & SD Indramayu",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Official receipt from school treasurer.",
       verifiedAt: "2026-10-05"
@@ -258,7 +258,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 3800000,
       vendor: "Pasar Tradisional Karangampel",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Approved monthly family provisions.",
       verifiedAt: "2026-10-05"
@@ -272,7 +272,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 2500000,
       vendor: "PayPal",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "PayPal transfer receipt confirmed.",
       verifiedAt: "2026-10-07"
@@ -288,7 +288,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 3900000,
       vendor: "TB. Rejeki Abadi",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Delivery slip signed.",
       verifiedAt: "2026-09-06"
@@ -302,7 +302,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 1950000,
       vendor: "Tukang Pak Karyo",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Weekly wages signed slip.",
       verifiedAt: "2026-09-15"
@@ -316,7 +316,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 2200000,
       vendor: "Bimbel & SMP Karangampel",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Tutoring card signed.",
       verifiedAt: "2026-09-04"
@@ -330,7 +330,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 3750000,
       vendor: "Warung Bu Eko & PLN",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "Approved monthly family provisions.",
       verifiedAt: "2026-09-05"
@@ -344,7 +344,7 @@ export const INITIAL_DATA: AppData = {
       amountIdr: 2500000,
       vendor: "PayPal",
       paidBy: "Slamet Widodo",
-      receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
+      receiptUrl: "/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
       verificationNotes: "PayPal transfer confirmation verified.",
       verifiedAt: "2026-09-07"
