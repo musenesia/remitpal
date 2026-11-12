@@ -37,7 +37,7 @@ RemitPal replaces the WhatsApp photos and mental accounting with a shared, verif
 |---|---|
 | **PayPal API** | PayPal Payouts v1 (`POST /v1/payments/payouts`, sandbox only): after Siti approves a plan in-app, the server creates a single-item payout batch from her own sandbox business account to Slamet's verified email — a ledger record is created only when PayPal reports the payout item SUCCESS, with the real payout batch id as the reference number. |
 | **AI** | Gemini 3.8 Flash drives a role-aware AI agent accessible via a WhatsApp-style chat bar always visible at the bottom of every screen. The agent uses Gemini function calling to orchestrate the full remittance lifecycle (see below). |
-| **Working prototype** | Full-stack: Express + PostgreSQL backend, React/Vite frontend, PayPal sandbox, Gemini API, Fonnte WhatsApp notifications — all deployed and runnable locally or on Render. |
+| **Working prototype** | Full-stack: Express + PostgreSQL backend, React/Vite frontend, PayPal sandbox, Gemini API, all deployed and runnable locally or on Render. |
 | **Documented** | This README. |
 
 ---
@@ -242,7 +242,6 @@ The `render.yaml` blueprint provisions a free PostgreSQL database and a Node web
 Set environment variables in the Render dashboard (marked `sync: false` in `render.yaml`):
 - `GEMINI_API_KEY` (and/or `OPENROUTER_API_KEY` — the OpenRouter fallback, model `OPENROUTER_MODEL`, defaults to `nvidia/nemotron-3.5-super-vl:free`)
 - `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_RECIPIENT_EMAIL`
-- `FONNTE_TOKEN` (optional)
 
 ---
 
@@ -254,8 +253,7 @@ remitpal/
 ├── server/
 │   ├── db.ts              # PostgreSQL schema, seed data, all DB helpers
 │   ├── agent.ts           # Gemini AI agent (function calling, tools, mock fallback)
-│   ├── paypal.ts          # PayPal Payouts v1 helper, sandbox only (OAuth, payout create/status, mock)
-│   └── whatsapp.ts        # Fonnte WhatsApp notification broadcast
+│   ├── paypal.ts          # PayPal Payouts v1 helper, sandbox only (OAuth, payout create/status, mock
 ├── src/
 │   ├── App.tsx            # Root component, global state, all handlers
 │   ├── components/
