@@ -1,6 +1,8 @@
 # RemitPal
 
-> **PayPal Hackathon entry** — an AI-powered remittance ledger for Indonesian migrant workers in Hong Kong, built on PayPal Personal Payments v2 (sandbox) + Gemini AI.
+> **PayPal Hackathon entry** — an AI-powered remittance ledger for Indonesian migrant workers in Hong Kong, built on PayPal Payouts v1 (sandbox) + Gemini AI.
+>
+> **RemitPal is Siti's personal remittance app, not a multi-user service.** Payouts are sent from her own sandbox business account, only after she approves a plan in-app, to Slamet's verified email. Sandbox only — no real money moves. For a multi-user version, Personal Payments v2 would be the right method so each sender pays from their own personal account; that API is limited-release and not enabled on this sandbox app (token creation returns 403 NOT_AUTHORIZED, debug_id f13223105b617), so this submission uses Payouts, which is approved on the same app.
 
 ---
 
@@ -23,7 +25,7 @@ Amanah Remit replaces the WhatsApp photos and mental accounting with a shared, v
 
 | Requirement | How it's met |
 |---|---|
-| **PayPal API** | PayPal Personal Payments v2 (`POST /v2/personal-payments/tokens`, sandbox only): the server creates a token, Siti approves it in PayPal's UI, PayPal returns her to the app, and the app looks the token up — a ledger record is created only when the lookup says COMPLETED and a transaction id is present. |
+| **PayPal API** | PayPal Payouts v1 (`POST /v1/payments/payouts`, sandbox only): after Siti approves a plan in-app, the server creates a single-item payout batch from her own sandbox business account to Slamet's verified email — a ledger record is created only when PayPal reports the payout item SUCCESS, with the real payout batch id as the reference number. |
 | **AI** | Gemini 3.8 Flash drives a role-aware AI agent accessible via a WhatsApp-style chat bar always visible at the bottom of every screen. The agent uses Gemini function calling to orchestrate the full remittance lifecycle (see below). |
 | **Working prototype** | Full-stack: Express + PostgreSQL backend, React/Vite frontend, PayPal sandbox, Gemini API, Fonnte WhatsApp notifications — all deployed and runnable locally or on Render. |
 | **Documented** | This README. |
@@ -40,8 +42,8 @@ The chat bar at the bottom of every screen connects to a Gemini 3.8 Flash agent 
 2. The agent calls `get_current_state` (reads live ledger) then `set_monthly_budget` (saves the allocation plan).
 3. The agent calls `request_remittance_approval` — this surfaces a structured approval card in the chat with the full allocation breakdown and the USD amount derived server-side from the IDR total at Rp 16,000/USD (display rate only, read-only on the card).
 4. **Human-in-the-loop**: Siti reviews the card and clicks **Approve & Send via PayPal**. The PayPal flow is never triggered by the AI alone.
-5. The frontend calls `POST /api/paypal/personal-payments/tokens` → the server creates a Personal Payments token (USD derived from the approved IDR total) → Siti is redirected to PayPal's UI to approve → PayPal returns her to the app with `?status=...&transactionId=...`.
-6. The app looks the token up (`GET /api/paypal/personal-payments/tokens/:id`) and creates the remittance record (with the PayPal transaction id as the reference number) ONLY when the lookup says COMPLETED and a transaction id is present. An activity notification + WhatsApp message is sent.
+5. The frontend calls `POST /api/paypal/send` → the server creates a PayPal Payouts v1 batch (USD derived from the approved IDR total) from Siti's own sandbox business account to Slamet's verified email.
+6. The app creates the remittance record (with the PayPal payout batch id as the reference number) ONLY when PayPal reports the payout item SUCCESS. An activity notification + WhatsApp message is sent.
 
 ### Slamet's flow — upload → classify → verify
 
@@ -70,7 +72,7 @@ The chat bar at the bottom of every screen connects to a Gemini 3.8 Flash agent 
 - **Backend**: Express 4, TypeScript (tsx dev / esbuild prod)
 - **Database**: PostgreSQL (Render-managed, `pg` pool)
 - **AI**: Google Gemini 3.8 Flash via `@google/genai` SDK v2 (function calling + multimodal vision)
-- **Payments**: PayPal Personal Payments v2 (sandbox only — live is never used)
+- **Payments**: PayPal Payouts v1 (sandbox only — live is never used)
 - **Notifications**: Fonnte WhatsApp gateway (optional)
 - **Deploy**: Render (free tier, `render.yaml` blueprint)
 
@@ -105,14 +107,14 @@ NODE_ENV="development"
 # AI Agent (get from https://aistudio.google.com/app/apikey)
 GEMINI_API_KEY="your_gemini_api_key"
 
-# PayPal Personal Payments v2, sandbox only (get from https://developer.paypal.com/dashboard)
+# PayPal Payouts v1, sandbox only (get from https://developer.paypal.com/dashboard)
 PAYPAL_CLIENT_ID="your_sandbox_client_id"
 PAYPAL_CLIENT_SECRET="your_sandbox_client_secret"
 PAYPAL_ENV="sandbox"  # sandbox only — live is not supported and is ignored
 PAYPAL_RECIPIENT_EMAIL="slamet_sandbox@example.com"  # a sandbox personal account
 
 # Optional: demo without real credentials
-PAYPAL_MOCK="false"   # set "true" for DEMO MODE (mock tokens, labelled MOCK, no real payment)
+PAYPAL_MOCK="false"   # set "true" for DEMO MODE (mock payout batches, labelled MOCK, no real payment)
 AGENT_MOCK="false"    # set "true" to run a rule-based mock agent (no Gemini key needed)
 
 # Optional: WhatsApp notifications via Fonnte
@@ -145,27 +147,30 @@ PAYPAL_MOCK="true"
 AGENT_MOCK="true"
 ```
 
-- As **Siti**: type *"Send 15M for this month: 5M renovation, 3.5M tuition, 4M allowance, 2.5M savings"* → the agent produces a structured approval card → click **Approve & Send via PayPal** → a mock token (`MOCK-<timestamp>`) is created and the remittance is recorded immediately, labelled MOCK (DEMO MODE — no PayPal payment moved).
+- As **Siti**: type *"Send 15M for this month: 5M renovation, 3.5M tuition, 4M allowance, 2.5M savings"* → the agent produces a structured approval card → click **Approve & Send via PayPal** → a mock payout batch (`MOCK-<timestamp>`) is created and the remittance is recorded immediately, labelled MOCK (DEMO MODE — no PayPal payment moved).
 - As **Slamet**: attach any image and type *"Bought tiles for 2.85M at TB Rejeki Abadi"* → the agent classifies it, sets status to pending (Siti reviews it), and adds it to the ledger.
 
 ---
 
-## PayPal Sandbox Setup (Personal Payments v2)
+## PayPal Sandbox Setup (Payouts v1)
 
 1. Go to [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/applications/sandbox).
-2. Create a **REST app** → copy the **Client ID** and **Secret** into `.env`.
-3. Under **Sandbox Accounts**, create a **Personal** account for Slamet — copy its email into `PAYPAL_RECIPIENT_EMAIL`. (Slamet is the receiver; Siti sends from her sandbox buyer/personal account when she approves in PayPal's UI.)
-4. Set `APP_URL` to the origin the browser actually reaches (e.g. `http://localhost:3000` locally, your Render service URL when deployed) — it is the base of the PayPal return URL.
-5. Set `PAYPAL_ENV=sandbox`. Live PayPal is never used.
+2. Create a **REST app** on a sandbox **Business** account with **Payouts approved** → copy the **Client ID** and **Secret** into `.env`. (This business account is Siti's own sender account — RemitPal is her personal app, not a multi-user service; she funds it herself and the app holds no one else's money.)
+3. Under **Sandbox Accounts**, create a **Personal** account for Slamet — copy its email into `PAYPAL_RECIPIENT_EMAIL`. Slamet is the receiver; the payout is sent to his email.
+4. Set `PAYPAL_ENV=sandbox`. Live PayPal is never used.
+
+### Why Payouts v1 (and not Personal Payments v2)
+
+For a multi-user remittance service, Personal Payments v2 would be the right method — each sender would pay from their own personal account in PayPal's UI. But that API is limited-release and is **not enabled on this sandbox app**: token creation returns `403 NOT_AUTHORIZED / PERMISSION_DENIED` (debug_id `f13223105b617`), and approval must be requested via p2papiapproval@paypal.com. Payouts v1 **is** approved on the same app, and it is the right method for RemitPal's actual scope: a personal app for one sender (Siti), whose own business account sends the payout only after she approves a plan in-app.
 
 ### How the payment flow works
 
 1. Siti approves a remittance in the chat (or the Remittance Tracker). The server derives the USD amount from the approved IDR total at Rp 16,000/USD — e.g. Rp 15,000,000 → **USD 937.50** (display rate only; the client never supplies the USD amount).
-2. `POST /api/paypal/personal-payments/tokens` creates a Personal Payments token for Slamet's sandbox personal account (currency `USD`, `payment_type` `PERSONAL`, `intent` `CAPTURE`).
-3. Siti is redirected to PayPal's UI (`initiate_payment` link + `return_url`) and approves the payment there with her sandbox buyer account.
-4. PayPal returns her to the app with only `?status=...&transactionId=...` — no token id, which is why the app stores the pending transfer in `sessionStorage` before redirecting.
-5. The app looks the token up (`GET /api/paypal/personal-payments/tokens/:id`) and creates the ledger record ONLY when the return says `success` AND the token lookup says `COMPLETED` AND a transaction id is present. The transaction id becomes the reference number. Any other outcome creates no record.
-6. **DEMO MODE** (`PAYPAL_MOCK=true`): no PayPal call is made. The token is `MOCK-<timestamp>` with no approval URL, and the record is created immediately via the explicit manual-record path, labelled `MOCK — DEMO MODE, no PayPal payment moved`.
+2. `POST /api/paypal/send` creates a single-item Payouts v1 batch for Slamet's sandbox personal account (currency `USD`, recipient by email), sent from Siti's own sandbox business account.
+3. The app creates the ledger record ONLY when PayPal reports the payout item `SUCCESS`. The payout batch id becomes the reference number. Any other outcome creates no record.
+4. **DEMO MODE** (`PAYPAL_MOCK=true`): no PayPal call is made. The batch id is `MOCK-<timestamp>` and the record is created immediately, labelled `MOCK — DEMO MODE, no PayPal payment moved`.
+
+Before filming or judging, check the sandbox business account balance is at least **USD 937.50** — a payout fails if the sender balance is insufficient.
 
 Never claim a sandbox transfer is a live international remittance.
 
@@ -194,7 +199,7 @@ amanah-remit/
 ├── server/
 │   ├── db.ts              # PostgreSQL schema, seed data, all DB helpers
 │   ├── agent.ts           # Gemini AI agent (function calling, tools, mock fallback)
-│   ├── paypal.ts          # PayPal Personal Payments v2 helper, sandbox only (OAuth, token create/lookup, mock)
+│   ├── paypal.ts          # PayPal Payouts v1 helper, sandbox only (OAuth, payout create/status, mock)
 │   └── whatsapp.ts        # Fonnte WhatsApp notification broadcast
 ├── src/
 │   ├── App.tsx            # Root component, global state, all handlers
