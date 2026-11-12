@@ -4,6 +4,12 @@
 >
 > **RemitPal is Siti's personal remittance app, not a multi-user service.** Payouts are sent from her own sandbox business account, only after she approves a plan in-app, to Slamet's verified email. Sandbox only — no real money moves. For a multi-user version, Personal Payments v2 would be the right method so each sender pays from their own personal account; that API is limited-release and not enabled on this sandbox app (token creation returns 403 NOT_AUTHORIZED, debug_id f13223105b617), so this submission uses Payouts, which is approved on the same app.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/musenesia/remitpal)
+
+## Deploy your own copy
+
+Click the **Deploy to Render** button above to host your own copy of RemitPal on Render. Sign in to Render with GitHub, authorize the repo, and name the Blueprint — Render provisions the free PostgreSQL database and web service from `render.yaml` automatically. When prompted, fill in the env vars (`GEMINI_API_KEY` and/or `OPENROUTER_API_KEY`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_RECIPIENT_EMAIL`); with no PayPal credentials the app runs in labelled DEMO MODE, and with no AI key it falls back to the labelled rule-based agent. Note: the free-tier web service sleeps after inactivity, so the first load is slow; set `APP_URL` to your Render service URL after the first deploy.
+
 ---
 
 ## What is RemitPal?
@@ -185,7 +191,7 @@ The `render.yaml` blueprint provisions a free PostgreSQL database and a Node web
 ```
 
 Set environment variables in the Render dashboard (marked `sync: false` in `render.yaml`):
-- `GEMINI_API_KEY`
+- `GEMINI_API_KEY` (and/or `OPENROUTER_API_KEY` — the OpenRouter fallback, model `OPENROUTER_MODEL`, defaults to `nvidia/nemotron-3.5-super-vl:free`)
 - `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_RECIPIENT_EMAIL`
 - `FONNTE_TOKEN` (optional)
 
