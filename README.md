@@ -14,7 +14,9 @@ Click the **Deploy to Render** button above to host your own copy of RemitPal on
 
 ## What is RemitPal?
 
-**RemitPal** is a family finance app for the Indonesian migrant workers.
+**RemitPal** is a family remittance ledger for Indonesian migrant workers, especially wives. She sends, he spends, and both see where every rupiah went, without her ever having to ask.
+
+<img width="1920" height="1080" alt="Screenshot-76" src="https://github.com/user-attachments/assets/cfc841b4-f4f6-46ac-86a4-c07141b3d3e2" />
 
 Siti Rahayu works as an elderly-care assistant in Causeway Bay. Every month she sends 15,000,000 IDR home to her husband Slamet Widodo so he can pay for the family's house renovation, the kids' school fees, and household expenses — while she is 3,000 km away and can only check receipts over WhatsApp.
 
@@ -42,6 +44,8 @@ RemitPal replaces the WhatsApp photos and mental accounting with a shared, verif
 
 The chat bar at the bottom of every screen connects to a Gemini 3.8 Flash agent with function calling. The agent is **role-aware**: it behaves differently for Siti and Slamet.
 
+<img width="1920" height="1080" alt="Screenshot-84" src="https://github.com/user-attachments/assets/6d017e91-a9c7-4e9b-8688-0666f470f490" />
+
 ### Siti's flow — plan → approve → send
 
 1. Siti types: *"Send 15 million for this month: 5M renovation, 3.5M tuition, 4M allowance, 2.5M savings"*
@@ -52,6 +56,8 @@ The chat bar at the bottom of every screen connects to a Gemini 3.8 Flash agent 
 6. The app creates the remittance record (with the PayPal payout batch id as the reference number) ONLY when PayPal reports the payout item SUCCESS. An activity notification + WhatsApp message is sent.
 
 ### Slamet's flow — upload → classify → verify
+
+<img width="1920" height="1080" alt="Screenshot-87" src="https://github.com/user-attachments/assets/a66f0f8c-374e-4167-8b3d-1de0764e2667" />
 
 1. Slamet attaches a receipt photo and types: *"Bought granite tiles for 2.85M at TB Rejeki Abadi"*
 2. The agent reads the image (multimodal/vision) and the text, extracts the vendor, amount, and what was bought, and chooses the best expense category (renovation / tuition / allowance / savings / miscellaneous).
