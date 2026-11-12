@@ -62,7 +62,7 @@ export default function App() {
   const [isDark, setIsDark] = useState<boolean>(() => {
     const saved = localStorage.getItem('remitpal_theme');
     if (saved) return saved === 'dark';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return true; // No saved preference: default to dark.
   });
 
   useEffect(() => {
