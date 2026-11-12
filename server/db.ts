@@ -183,7 +183,7 @@ async function seedUsersIfEmpty() {
       'Siti Rahayu',
       'remitter',
       'Causeway Bay, Hong Kong',
-      '/src/assets/images/worker_profile_avatar_1794285313427.jpg',
+      '/images/worker_profile_avatar_1794285313427.jpg',
       '628123456789',
       new Date().toISOString()
     ]);

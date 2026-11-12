@@ -348,7 +348,7 @@ export const BentoOverview: React.FC<BentoOverviewProps> = ({
           <div className="rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xs overflow-hidden">
             <div className="relative h-44 overflow-hidden bg-neutral-100 dark:bg-neutral-800">
               <img 
-                src="/src/assets/images/family_house_indramayu_1794285314079.jpg" 
+                src="/images/family_house_indramayu_1794285314079.jpg" 
                 alt="Indramayu Family Home Renovation" 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"

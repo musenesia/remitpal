@@ -47,7 +47,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   };
 
   const handleUseSampleReceipt = () => {
-    setReceiptUrl('/src/assets/images/receipt_sample_material_1794285314395.jpg');
+    setReceiptUrl('/images/receipt_sample_material_1794285314395.jpg');
     setReceiptStatus('verified');
   };
 
