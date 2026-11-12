@@ -1,5 +1,5 @@
 import { AppData, CalendarEvent, ExpenseItem, MonthlyBudget, ReceiptStatus, RemittanceRecord, UserProfile, AppNotification } from '../types';
-import { loadAppData, saveAppData } from './storage';
+import { loadAppData, saveAppData, sanitizeAppData } from './storage';
 
 const TOKEN_KEY = 'remitpal_auth_token';
 const USER_KEY = 'remitpal_auth_user';
@@ -82,8 +82,9 @@ export async function fetchAppData(): Promise<{ data: AppData; fromServer: boole
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.data && Array.isArray(json.data.expenses)) {
-      saveAppData(json.data);
-      return { data: json.data, fromServer: true };
+      const sanitized = sanitizeAppData(json.data) || json.data;
+      saveAppData(sanitized);
+      return { data: sanitized, fromServer: true };
     }
   } catch (err: any) {
     // A genuine 401 must NOT fall back silently to local seed data: report it

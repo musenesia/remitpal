@@ -461,7 +461,7 @@ export const BentoOverview: React.FC<BentoOverviewProps> = ({
         </div>
 
         {/* Crisp Responsive SVG Bar Chart */}
-        <div className="w-full h-56 pt-4">
+        <div className="w-full h-[280px] pt-4">
           <svg className="w-full h-full" viewBox="0 0 600 200" preserveAspectRatio="none">
             {/* Horizontal Grid lines */}
             <line x1="40" y1="20" x2="580" y2="20" stroke="currentColor" className="text-neutral-100 dark:text-neutral-800" strokeWidth="1" />

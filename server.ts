@@ -28,7 +28,6 @@ import {
   closePool
 } from './server/db.ts';
 import type { UserProfile } from './src/types';
-import { broadcastEventNotification } from './server/whatsapp.ts';
 import { sendPayout, getPayoutStatus, isPayPalConfigured, payPalConfigError, idrToUsd, PayPalError } from './server/paypal.ts';
 import { runAgent, isAgentEnabled } from './server/agent.ts';
 import type { AgentRequest } from './server/agent.ts';
@@ -234,8 +233,6 @@ app.post('/api/expenses', requireAuth, async (req: Request, res: Response) => {
         category: expense.categoryId,
         amountIdr: expense.amountIdr
       });
-      // Broadcast a WhatsApp message to both family members via Fonnte
-      await broadcastEventNotification(notifTitle, notifDesc, 'Slamet Widodo');
     } catch (notifErr) {
       console.warn('Could not create notification for expense:', notifErr);
     }
@@ -268,8 +265,6 @@ app.patch('/api/expenses/:id/receipt', requireAuth, requireRole('remitter'), asy
         description: notifDesc,
         relatedId: id
       });
-      // Broadcast a WhatsApp message to both family members via Fonnte
-      await broadcastEventNotification(notifTitle, notifDesc, 'Siti Rahayu');
     } catch (notifErr) {
       console.warn('Could not create notification for receipt status:', notifErr);
     }
@@ -318,8 +313,6 @@ app.post('/api/remittances', requireAuth, requireRole('remitter'), async (req: R
         category: 'remittance',
         amountIdr: record.amountIdr
       });
-      // Broadcast a WhatsApp message to both family members via Fonnte
-      await broadcastEventNotification(notifTitle, notifDesc, 'Siti Rahayu');
     } catch (notifErr) {
       console.warn('Could not create notification for remittance:', notifErr);
     }
@@ -368,7 +361,7 @@ app.delete('/api/remittances/:id', requireAuth, requireRole('remitter'), async (
  * This endpoint is intentionally payout-only: it returns the PayPal
  * batch id and status so the frontend can build a RemittanceRecord
  * and persist it through the normal /api/remittances flow (which also
- * fires the single notification + WhatsApp broadcast). Keeping the
+ * fires the single notification). Keeping the
  * payout separate avoids double notifications.
  */
 app.post('/api/paypal/send', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
