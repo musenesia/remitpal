@@ -236,6 +236,7 @@ export const ChatBar: React.FC<ChatBarProps> = ({
         receiver: `${data.workerProfile.husbandName} (Indramayu)`,
         referenceNo: payout.payoutBatchId,
         notes:
+          `${msg.pendingAction.isExtra ? `EXTRA transfer — ${msg.pendingAction.reason || 'extra/emergency transfer'}. Month total after this: ${formatCurrencyIdr(msg.pendingAction.monthTotalAfterIdr || amountIdr)}. ` : ''}` +
           `${msg.pendingAction.note ? msg.pendingAction.note + ' ' : ''}` +
           `Allocation: ${allocLines || 'n/a'}. PayPal Payouts v1 (sandbox) · USD ${amountUsd} · batch ${payout.payoutBatchId}${mockTag}.`,
         status: isReceived ? 'received' : 'in_transit',
@@ -456,7 +457,9 @@ const MessageBubble: React.FC<{
                   <Check className="w-3.5 h-3.5 text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">Remittance approved &amp; sent via PayPal</p>
+                  <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                    {message.pendingAction.isExtra ? 'EXTRA remittance approved & sent via PayPal' : 'Remittance approved & sent via PayPal'}
+                  </p>
                   <p className="text-[11px] text-emerald-600 dark:text-emerald-400 truncate">
                     {formatCurrencyIdr(message.pendingAction.amountIdr)} · {message.pendingAction.monthYear}
                   </p>
@@ -480,11 +483,20 @@ const MessageBubble: React.FC<{
 
             {/* Pending: full actionable card */}
             {showApproval && (
-              <div className="w-full p-3 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-bl-md">
+              <div className={`w-full p-3 rounded-2xl border rounded-bl-md ${message.pendingAction.isExtra ? 'border-amber-300 dark:border-amber-700/70 bg-amber-50/70 dark:bg-amber-950/30' : 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-950/30'}`}>
                 <div className="flex items-center gap-1.5 mb-2">
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                  <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">Remittance for your approval</span>
+                  <Sparkles className={`w-3.5 h-3.5 ${message.pendingAction.isExtra ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
+                  <span className={`text-xs font-semibold ${message.pendingAction.isExtra ? 'text-amber-900 dark:text-amber-200' : 'text-emerald-900 dark:text-emerald-200'}`}>
+                    {message.pendingAction.isExtra ? '⚠️ EXTRA transfer — for your approval' : 'Remittance for your approval'}
+                  </span>
                 </div>
+
+                {message.pendingAction.isExtra && (
+                  <p className="text-xs text-amber-800 dark:text-amber-200 mb-2">
+                    Second transfer in {message.pendingAction.monthYear} — please confirm this is intentional.
+                    {message.pendingAction.reason ? ` Reason: ${message.pendingAction.reason}.` : ''}
+                  </p>
+                )}
 
                 <div className="space-y-1.5 text-xs text-neutral-700 dark:text-neutral-200">
                   <div className="flex justify-between">
@@ -495,6 +507,18 @@ const MessageBubble: React.FC<{
                     <span className="text-neutral-500">Month</span>
                     <span className="font-mono">{message.pendingAction.monthYear}</span>
                   </div>
+                  {message.pendingAction.isExtra && (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-neutral-500">Already sent this month</span>
+                        <span className="font-mono">{formatCurrencyIdr(message.pendingAction.monthRemittanceTotalIdr || 0)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-neutral-500">Month total after this</span>
+                        <span className="font-mono font-semibold">{formatCurrencyIdr(message.pendingAction.monthTotalAfterIdr || message.pendingAction.amountIdr)}</span>
+                      </div>
+                    </>
+                  )}
                   {Object.keys(message.pendingAction.allocations || {}).length > 0 && (
                     <div className="pt-1.5 mt-1.5 border-t border-emerald-200/60 dark:border-emerald-800/60">
                       <div className="text-neutral-500 mb-1">Allocations</div>
