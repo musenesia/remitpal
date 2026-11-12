@@ -5,8 +5,10 @@
 //   • Siti (remitter, Hong Kong): "send 15M for November: 5M renovation, 3.5M
 //     tuition, 4M allowance, 2.5M savings" → the agent structures it into a
 //     remittance draft and asks for approval (human-in-the-loop). Money is
-//     only moved when Siti approves in the UI, which starts the PayPal
-//     Personal Payments v2 flow (token → PayPal UI → return → lookup).
+//     only moved when Siti approves in the UI, which runs the PayPal
+//     Payouts v1 flow (server creates a payout batch from Siti's own
+//     business account to Slamet's verified email; a record is created
+//     only when PayPal reports the payout item SUCCESS).
 //   • Slamet (manager, Indramayu): attaches a receipt photo + describes the
 //     purchase → the agent (multimodal) reads the photo, classifies /
 //     categorizes the expense, adds it to the ledger, and triages the receipt:
@@ -132,7 +134,7 @@ const tools: FunctionDeclaration[] = [
   {
     name: 'request_remittance_approval',
     description:
-      'Present a structured remittance draft to Siti for human approval BEFORE any money moves. The UI shows an Approve/Reject card; the PayPal Personal Payments flow only starts if Siti approves. Always use this instead of sending money directly. paypalAmount must equal amountIdr/16000 in USD (display rate Rp 16,000/USD) and currency must be "USD".',
+      'Present a structured remittance draft to Siti for human approval BEFORE any money moves. The UI shows an Approve/Reject card; the PayPal Payouts flow only starts if Siti approves. Always use this instead of sending money directly. paypalAmount must equal amountIdr/16000 in USD (display rate Rp 16,000/USD) and currency must be "USD".',
     parameters: {
       type: 'object',
       properties: {
@@ -149,7 +151,7 @@ const tools: FunctionDeclaration[] = [
             miscellaneous: { type: 'number' },
           },
         },
-        paypalAmount: { type: 'number', description: 'USD amount to send via PayPal Personal Payments — must equal amountIdr / 16000' },
+        paypalAmount: { type: 'number', description: 'USD amount to send via PayPal Payouts — must equal amountIdr / 16000' },
         currency: { type: 'string', description: 'PayPal currency code — must be "USD"' },
         note: { type: 'string' },
       },
@@ -399,7 +401,7 @@ IMPORTANT: Always reply in English, even though the family is Indonesian, the le
 
 The current user is ${user.name} (role: ${user.role}, in ${user.location}).
 ${isSiti
-  ? `As Siti, you help her PLAN and SEND remittances. When she describes a remittance with allocations, structure it and ALWAYS call request_remittance_approval — never send money yourself. Siti must approve in the UI; only then does the PayPal Personal Payments flow start (token → PayPal UI → return → lookup). You may also set the monthly budget (set_monthly_budget), schedule calendar events (add_calendar_event), and review pending receipts (update_receipt_status).`
+  ? `As Siti, you help her PLAN and SEND remittances. When she describes a remittance with allocations, structure it and ALWAYS call request_remittance_approval — never send money yourself. Siti must approve in the UI; only then does the PayPal Payouts flow start (server creates a payout batch from her own business account to Slamet). You may also set the monthly budget (set_monthly_budget), schedule calendar events (add_calendar_event), and review pending receipts (update_receipt_status).`
   : `As Slamet, you help him LOG spending and SCHEDULE tasks. When he attaches a receipt photo, READ it, extract the vendor, amount, and what was bought, choose the best category, and call add_expense. Assess the photo honestly: if it looks clear, call add_expense with "pending" and note that it looks clear — only Siti can mark a receipt "verified"; if unclear or you can't tell -> "pending" (Siti will review); if blurry, edited, or unreadable -> "needs_clarification" (ask Slamet to re-upload a clearer photo). Never accuse anyone of fraud. Put the photo data URL into receiptDataUrl so it's stored. Slamet can also schedule tasks and reminders via add_calendar_event.`}
 
 Always reply in English. Be concise and warm. Amounts in IDR. Use the tools to act; don't describe actions you can perform via tools.`;
