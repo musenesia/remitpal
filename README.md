@@ -12,7 +12,7 @@
 
 Siti Rahayu works as an elderly-care assistant in Causeway Bay. Every month she sends 15,000,000 IDR home to her husband Slamet Widodo so he can pay for the family's house renovation, the kids' school fees, and household expenses — while she is 3,000 km away and can only check receipts over WhatsApp.
 
-Amanah Remit replaces the WhatsApp photos and mental accounting with a shared, verifiable ledger:
+RemitPal replaces the WhatsApp photos and mental accounting with a shared, verifiable ledger:
 
 | Person | Role | What they do in the app |
 |--------|------|-------------------------|
@@ -194,7 +194,7 @@ Set environment variables in the Render dashboard (marked `sync: false` in `rend
 ## Project Structure
 
 ```
-amanah-remit/
+remitpal/
 ├── server.ts              # Express API server entry point
 ├── server/
 │   ├── db.ts              # PostgreSQL schema, seed data, all DB helpers

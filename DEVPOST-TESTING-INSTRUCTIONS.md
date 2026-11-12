@@ -1,4 +1,4 @@
-# RemitPal (Amanah) — Devpost testing instructions (paste-ready draft)
+# RemitPal — Devpost testing instructions (paste-ready draft)
 
 Prepared 2026-11-12 (WIB), for the `payouts-personal-app` branch of
 `musenesia/remitpal`. This file contains PLACEHOLDERS only — never real
