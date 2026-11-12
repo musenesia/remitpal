@@ -417,65 +417,110 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors">
-      <div className="max-w-[1440px] mx-auto flex min-h-screen">
-        {/* Left Sidebar Navigation */}
-        <Sidebar
-          currentTab={currentTab}
-          onSelectTab={setCurrentTab}
-          t={t}
-          isDark={isDark}
-          onToggleTheme={handleToggleTheme}
-          onOpenDataModal={() => setIsDataModalOpen(true)}
-          data={data}
-          isMobileOpen={isMobileSidebarOpen}
-          onCloseMobile={() => setIsMobileSidebarOpen(false)}
-          currentUser={currentUser}
-          onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          onLogout={handleLogout}
-          isDbConnected={isDbConnected}
-          unreadNotificationsCount={unreadNotificationsCount}
-          serviceStatus={serviceStatus}
-        />
 
-        {/* Main Content Area (offset by left sidebar on desktop) */}
-        <div className="flex-1 min-w-0 lg:pl-72 flex flex-col">
-          {/* Top Header */}
-          <Header
+      {/* ── Unauthenticated gate: full-screen login page ── */}
+      {!currentUser ? (
+        <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-neutral-950 via-neutral-900 to-neutral-800">
+          {/* Branding */}
+          <div className="mb-8 text-center space-y-2">
+            <div className="flex items-center justify-center gap-3 mb-3">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold text-xl shadow-lg">
+                R
+              </div>
+              <span className="text-3xl font-bold text-white tracking-tight">RemitPal</span>
+            </div>
+            <p className="text-neutral-400 text-sm max-w-xs">
+              Family remittance ledger for Indonesian migrant workers. Sign in to access the family ledger.
+            </p>
+          </div>
+
+          {/* Inline login card */}
+          <div className="w-full max-w-sm bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
+            {/* Card header */}
+            <div className="p-6 border-b border-neutral-100 dark:border-neutral-800 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">Sign in to RemitPal</h2>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Secure PostgreSQL authentication</p>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <AuthModal
+                isOpen={true}
+                onClose={() => {}}
+                currentUser={null}
+                onLoginSuccess={handleLoginSuccess}
+                inline={true}
+              />
+            </div>
+          </div>
+
+          {/* Theme toggle */}
+          <button
+            onClick={handleToggleTheme}
+            className="mt-6 text-xs text-neutral-500 hover:text-neutral-300 transition-colors flex items-center gap-1.5"
+          >
+            {isDark ? '☀️ Light mode' : '🌙 Dark mode'}
+          </button>
+        </div>
+      ) : (
+        /* ── Authenticated: full dashboard ── */
+        <div className="max-w-[1440px] mx-auto flex min-h-screen">
+          {/* Left Sidebar Navigation */}
+          <Sidebar
             currentTab={currentTab}
-            selectedMonth={selectedMonth}
-            availableMonths={availableMonths}
-            onSelectMonth={setSelectedMonth}
+            onSelectTab={setCurrentTab}
             t={t}
-            onOpenAddExpense={handleOpenAddExpense}
-            onOpenRecordRemittance={() => setCurrentTab('remittances')}
-            onPrint={handlePrint}
-            onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
+            isDark={isDark}
+            onToggleTheme={handleToggleTheme}
+            onOpenDataModal={() => setIsDataModalOpen(true)}
+            data={data}
+            isMobileOpen={isMobileSidebarOpen}
+            onCloseMobile={() => setIsMobileSidebarOpen(false)}
             currentUser={currentUser}
             onOpenAuthModal={() => setIsAuthModalOpen(true)}
-            onQuickSwitchUser={handleQuickSwitchUser}
-            notifications={notifications}
-            onMarkNotificationRead={handleMarkNotificationRead}
-            onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
-            onNavigateTab={setCurrentTab}
+            onLogout={handleLogout}
+            isDbConnected={isDbConnected}
+            unreadNotificationsCount={unreadNotificationsCount}
+            serviceStatus={serviceStatus}
           />
 
-          {/* User Role Banner */}
-          {currentUser && (
+          {/* Main Content Area (offset by left sidebar on desktop) */}
+          <div className="flex-1 min-w-0 lg:pl-72 flex flex-col">
+            {/* Top Header */}
+            <Header
+              currentTab={currentTab}
+              selectedMonth={selectedMonth}
+              availableMonths={availableMonths}
+              onSelectMonth={setSelectedMonth}
+              t={t}
+              onOpenAddExpense={handleOpenAddExpense}
+              onOpenRecordRemittance={() => setCurrentTab('remittances')}
+              onPrint={handlePrint}
+              onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
+              currentUser={currentUser}
+              onOpenAuthModal={() => setIsAuthModalOpen(true)}
+              onQuickSwitchUser={handleQuickSwitchUser}
+              notifications={notifications}
+              onMarkNotificationRead={handleMarkNotificationRead}
+              onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+              onNavigateTab={setCurrentTab}
+            />
+
+            {/* User Role Banner */}
             <div className={`px-4 sm:px-6 lg:px-8 py-2.5 text-xs font-medium border-b flex items-center justify-between transition-colors ${
               currentUser.role === 'remitter'
                 ? 'bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200 border-emerald-200/60 dark:border-emerald-800/60'
                 : 'bg-sky-50/70 dark:bg-sky-950/30 text-sky-900 dark:text-sky-200 border-sky-200/60 dark:border-sky-800/60'
             }`}>
-              <div className="flex items-center gap-2">
-                <span className="hidden md:inline text-neutral-600 dark:text-neutral-400">
-                  {currentUser.role === 'remitter'
-                    ? 'Verify receipts sent by Slamet and adjust monthly budget targets.'
-                    : 'Record local expenses, upload purchase receipts, and tick completed renovation tasks.'}
-                </span>
-              </div>
-
-
-
+              <span className="hidden md:inline text-neutral-600 dark:text-neutral-400">
+                {currentUser.role === 'remitter'
+                  ? 'Verify receipts sent by Slamet and adjust monthly budget targets.'
+                  : 'Record local expenses, upload purchase receipts, and tick completed renovation tasks.'}
+              </span>
               <button
                 onClick={handleQuickSwitchUser}
                 className="underline hover:no-underline font-semibold cursor-pointer shrink-0 ml-2"
@@ -483,158 +528,158 @@ export default function App() {
                 Switch to {currentUser.username === 'siti' ? 'Slamet' : 'Siti'}
               </button>
             </div>
-          )}
 
-          {/* Primary View Area — extra bottom padding so content clears the fixed ChatBar */}
-          <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-28 space-y-6">
-            {currentTab === 'overview' && (
-              <BentoOverview
-                data={data}
-                selectedMonth={selectedMonth}
-                t={t}
-                onSelectTab={setCurrentTab}
-                onOpenReceiptModal={(exp) => setInspectingExpense(exp)}
-                onOpenAddExpense={handleOpenAddExpense}
-              />
-            )}
+            {/* Primary View Area — extra bottom padding so content clears the fixed ChatBar */}
+            <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-28 space-y-6">
+              {currentTab === 'overview' && (
+                <BentoOverview
+                  data={data}
+                  selectedMonth={selectedMonth}
+                  t={t}
+                  onSelectTab={setCurrentTab}
+                  onOpenReceiptModal={(exp) => setInspectingExpense(exp)}
+                  onOpenAddExpense={handleOpenAddExpense}
+                />
+              )}
 
-            {currentTab === 'expenses' && (
-              <ExpenseList
-                expenses={data.expenses}
-                selectedMonth={selectedMonth}
-                onSelectMonth={setSelectedMonth}
-                availableMonths={availableMonths}
-                t={t}
-                onAddExpense={handleOpenAddExpense}
-                onEditExpense={handleOpenEditExpense}
-                onDeleteExpense={handleDeleteExpense}
-                onOpenReceiptModal={(exp) => setInspectingExpense(exp)}
-              />
-            )}
+              {currentTab === 'expenses' && (
+                <ExpenseList
+                  expenses={data.expenses}
+                  selectedMonth={selectedMonth}
+                  onSelectMonth={setSelectedMonth}
+                  availableMonths={availableMonths}
+                  t={t}
+                  onAddExpense={handleOpenAddExpense}
+                  onEditExpense={handleOpenEditExpense}
+                  onDeleteExpense={handleDeleteExpense}
+                  onOpenReceiptModal={(exp) => setInspectingExpense(exp)}
+                />
+              )}
 
-            {currentTab === 'remittances' && (
-              <RemittanceTracker
-                data={data}
-                t={t}
-                onAddRemittance={handleAddRemittance}
-                currentUser={currentUser}
-                onOpenAuthModal={() => setIsAuthModalOpen(true)}
-              />
-            )}
+              {currentTab === 'remittances' && (
+                <RemittanceTracker
+                  data={data}
+                  t={t}
+                  onAddRemittance={handleAddRemittance}
+                  currentUser={currentUser}
+                  onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                />
+              )}
 
-            {currentTab === 'receipts' && (
-              <ReceiptVault
-                expenses={data.expenses}
-                t={t}
-                onOpenReceiptModal={(exp) => setInspectingExpense(exp)}
-                onOpenAddExpense={handleOpenAddExpense}
-              />
-            )}
+              {currentTab === 'receipts' && (
+                <ReceiptVault
+                  expenses={data.expenses}
+                  t={t}
+                  onOpenReceiptModal={(exp) => setInspectingExpense(exp)}
+                  onOpenAddExpense={handleOpenAddExpense}
+                />
+              )}
 
-            {currentTab === 'budget' && (
-              <BudgetPlanner
-                data={data}
-                selectedMonth={selectedMonth}
-                availableMonths={availableMonths}
-                t={t}
-                onUpdateBudget={handleUpdateBudget}
-              />
-            )}
+              {currentTab === 'budget' && (
+                <BudgetPlanner
+                  data={data}
+                  selectedMonth={selectedMonth}
+                  availableMonths={availableMonths}
+                  t={t}
+                  onUpdateBudget={handleUpdateBudget}
+                />
+              )}
 
-            {currentTab === 'calendar' && (
-              <CalendarScheduler
-                data={data}
-                t={t}
-                onAddEvent={handleSaveEvent}
-                onEditEvent={handleOpenEditEvent}
-                onDeleteEvent={handleDeleteEvent}
-                onToggleComplete={handleToggleEventComplete}
-                onOpenAddModalWithDate={handleOpenAddEvent}
-              />
-            )}
+              {currentTab === 'calendar' && (
+                <CalendarScheduler
+                  data={data}
+                  t={t}
+                  onAddEvent={handleSaveEvent}
+                  onEditEvent={handleOpenEditEvent}
+                  onDeleteEvent={handleDeleteEvent}
+                  onToggleComplete={handleToggleEventComplete}
+                  onOpenAddModalWithDate={handleOpenAddEvent}
+                />
+              )}
 
-            {currentTab === 'notifications' && (
-              <NotificationFeed
-                notifications={notifications}
-                onMarkAsRead={handleMarkNotificationRead}
-                onMarkAllAsRead={handleMarkAllNotificationsRead}
-                onDeleteNotification={handleDeleteNotification}
-                onNavigateTab={setCurrentTab}
-              />
-            )}
+              {currentTab === 'notifications' && (
+                <NotificationFeed
+                  notifications={notifications}
+                  onMarkAsRead={handleMarkNotificationRead}
+                  onMarkAllAsRead={handleMarkAllNotificationsRead}
+                  onDeleteNotification={handleDeleteNotification}
+                  onNavigateTab={setCurrentTab}
+                />
+              )}
 
-            {currentTab === 'report' && (
-              <AuditReport
-                data={data}
-                selectedMonth={selectedMonth}
-                t={t}
-                onBack={() => setCurrentTab('overview')}
-                onPrint={handlePrint}
-              />
-            )}
-          </main>
+              {currentTab === 'report' && (
+                <AuditReport
+                  data={data}
+                  selectedMonth={selectedMonth}
+                  t={t}
+                  onBack={() => setCurrentTab('overview')}
+                  onPrint={handlePrint}
+                />
+              )}
+            </main>
+          </div>
+
+          {/* Modal: Add / Edit Expense */}
+          <ExpenseModal
+            isOpen={isExpenseModalOpen}
+            onClose={() => setIsExpenseModalOpen(false)}
+            onSave={handleSaveExpense}
+            editingExpense={editingExpense}
+            husbandName={data.workerProfile.husbandName}
+            t={t}
+          />
+
+          {/* Modal: Inspect & Verify Receipt */}
+          <ReceiptModal
+            isOpen={!!inspectingExpense}
+            onClose={() => setInspectingExpense(null)}
+            expense={inspectingExpense}
+            currentUser={currentUser}
+            onUpdateStatus={handleUpdateReceiptStatus}
+            onUploadReceipt={handleUploadReceipt}
+            t={t}
+          />
+
+          {/* Modal: Add / Edit Calendar Schedule & Task */}
+          <EventModal
+            isOpen={isEventModalOpen}
+            onClose={() => setIsEventModalOpen(false)}
+            onSave={handleSaveEvent}
+            editingEvent={editingEvent}
+            defaultDate={eventDefaultDate}
+            husbandName={data.workerProfile.husbandName}
+            workerName={data.workerProfile.name}
+            t={t}
+          />
+
+          {/* Modal: Data Management (Import / Export JSON & CSV, Reset) */}
+          <DataManagementModal
+            isOpen={isDataModalOpen}
+            onClose={() => setIsDataModalOpen(false)}
+            data={data}
+            onDataReplaced={handleSaveData}
+            onResetDatabase={handleResetDatabase}
+            t={t}
+          />
+
+          {/* Modal: Authentication (switch account while logged in) */}
+          <AuthModal
+            isOpen={isAuthModalOpen}
+            onClose={() => setIsAuthModalOpen(false)}
+            currentUser={currentUser}
+            onLoginSuccess={handleLoginSuccess}
+          />
+
+          {/* AI Agent chat bar */}
+          <ChatBar
+            currentUser={currentUser}
+            data={data}
+            onAddRemittance={handleAddRemittance}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            onDataChanged={handleAgentDataChanged}
+          />
         </div>
-      </div>
-
-      {/* Modal: Add / Edit Expense */}
-      <ExpenseModal
-        isOpen={isExpenseModalOpen}
-        onClose={() => setIsExpenseModalOpen(false)}
-        onSave={handleSaveExpense}
-        editingExpense={editingExpense}
-        husbandName={data.workerProfile.husbandName}
-        t={t}
-      />
-
-      {/* Modal: Inspect & Verify Receipt */}
-      <ReceiptModal
-        isOpen={!!inspectingExpense}
-        onClose={() => setInspectingExpense(null)}
-        expense={inspectingExpense}
-        currentUser={currentUser}
-        onUpdateStatus={handleUpdateReceiptStatus}
-        onUploadReceipt={handleUploadReceipt}
-        t={t}
-      />
-
-      {/* Modal: Add / Edit Calendar Schedule & Task */}
-      <EventModal
-        isOpen={isEventModalOpen}
-        onClose={() => setIsEventModalOpen(false)}
-        onSave={handleSaveEvent}
-        editingEvent={editingEvent}
-        defaultDate={eventDefaultDate}
-        husbandName={data.workerProfile.husbandName}
-        workerName={data.workerProfile.name}
-        t={t}
-      />
-
-      {/* Modal: Data Management (Import / Export JSON & CSV, Reset) */}
-      <DataManagementModal
-        isOpen={isDataModalOpen}
-        onClose={() => setIsDataModalOpen(false)}
-        data={data}
-        onDataReplaced={handleSaveData}
-        onResetDatabase={handleResetDatabase}
-        t={t}
-      />
-
-      {/* Modal: Authentication (Siti & Slamet) */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        currentUser={currentUser}
-        onLoginSuccess={handleLoginSuccess}
-      />
-
-      {/* Always-visible AI Agent chat bar (WhatsApp-style fixed bottom) */}
-      <ChatBar
-        currentUser={currentUser}
-        data={data}
-        onAddRemittance={handleAddRemittance}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        onDataChanged={handleAgentDataChanged}
-      />
+      )}
     </div>
   );
 }
