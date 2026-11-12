@@ -464,10 +464,11 @@ async function runGeminiAgent(req: AgentRequest): Promise<AgentResponse> {
 
   for (let i = 0; i < 6; i++) {
     const response = await withRetry(() => {
-      // 20 s per Gemini call — fast-fail so the NIM fallback has time to run
-      // within nginx's 60 s proxy window.
+      // 15 s per Gemini call — fast-fail so retries + OpenRouter fallback all
+      // fit inside the 55 s Express timeout (15s × 2 attempts + 0.5s delay +
+      // 25s OpenRouter = ~55.5 s worst case, right at the limit).
       const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 20_000);
+      const tid = setTimeout(() => controller.abort(), 15_000);
       return ai.models.generateContent({
         model: MODEL,
         contents,
