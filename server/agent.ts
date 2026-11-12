@@ -25,6 +25,11 @@
 //     instead of executing, so the AI never sends money on its own.
 //   - Falls back to a lightweight rule-based mock agent when GEMINI_API_KEY is
 //     absent or AGENT_MOCK=true, so the full chat flow is demoable offline.
+//   - EXTRA / emergency transfers: a second transfer in a month that already
+//     has one is allowed, but never silent — the server blocks the approval
+//     card until Siti confirms it is intentional and says what it is for,
+//     then labels the card EXTRA with the reason and the new month total.
+//     A first transfer in a month has no extra friction.
 
 import { GoogleGenAI, FunctionDeclaration, FunctionCall } from '@google/genai';
 import {
@@ -67,6 +72,15 @@ export interface RemittanceApprovalDraft {
   paypalAmount: number;
   currency: string;
   note: string;
+  // EXTRA / emergency transfer (a second or later transfer in a month that
+  // already has one). Computed server-side from the ledger, never trusted
+  // from the model: isExtra is true exactly when the month already has a
+  // remittance; monthTotalAfterIdr is the server-computed month total after
+  // this transfer. A normal first transfer in a month has isExtra false.
+  isExtra?: boolean;
+  reason?: string; // why the EXTRA transfer is needed, in Siti's own words
+  monthRemittanceTotalIdr?: number; // already sent this month, before this transfer
+  monthTotalAfterIdr?: number; // month total after this transfer
 }
 
 export interface AgentReply {
@@ -153,6 +167,8 @@ const tools: FunctionDeclaration[] = [
         paypalAmount: { type: 'number', description: 'USD amount to send via PayPal Payouts — must equal amountIdr / 16000' },
         currency: { type: 'string', description: 'PayPal currency code — must be "USD"' },
         note: { type: 'string' },
+        isExtra: { type: 'boolean', description: 'Set true when this is a second (or later) transfer in a month that already has one — an EXTRA / emergency transfer. Never present a duplicate-month transfer as a normal monthly remittance.' },
+        reason: { type: 'string', description: 'Why this EXTRA transfer is needed, in Siti\'s own words (e.g. "Slamet is in hospital"). Required when isExtra is true; leave empty for a normal first transfer in a month.' },
       },
       required: ['amountIdr', 'monthYear', 'allocations', 'paypalAmount', 'currency'],
     } as any,
@@ -224,9 +240,11 @@ async function getCurrentState(user: UserProfile) {
   const pending = data.expenses.filter(
     (e) => e.receiptStatus === 'pending' || e.receiptStatus === 'needs_clarification'
   );
+  const monthRows = data.remittances.filter((r) => r.monthYear === monthYear);
   return {
     user: { name: user.name, role: user.role, location: user.location },
     currentMonth: monthYear,
+    monthRemittances: { count: monthRows.length, totalIdr: monthRows.reduce((sum, r) => sum + (Number(r.amountIdr) || 0), 0) },
     budget: budget
       ? { monthYear: budget.monthYear, totalRemittancePlanned: budget.totalRemittancePlanned, allocations: budget.allocations }
       : null,
@@ -245,6 +263,106 @@ async function getCurrentState(user: UserProfile) {
     })),
     pendingReceipts: pending.map((e) => ({ id: e.id, title: e.title, amountIdr: e.amountIdr, status: e.receiptStatus })),
     categories: CATEGORIES,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// EXTRA / emergency transfer — duplicate-month guard (server-enforced)
+// ---------------------------------------------------------------------------
+// A second transfer in a month that already has one is ALLOWED — emergencies
+// happen (accident, hospitalisation) — but it is never silent and never a
+// normal monthly remittance. The guard is enforced here, in code, not left
+// to the model's judgement: the first time the agent tries to present a
+// duplicate-month draft, the server blocks the approval card and returns a
+// warning that states the existing month total and the new month total and
+// asks Siti to confirm what the extra money is for. Only once she has
+// confirmed — in her own words in this conversation, or via the model's
+// isExtra + reason — does the server hand back an approval card, labelled
+// EXTRA, with the reason and the month total after this transfer. The
+// human approval gate is unchanged: nothing moves until Siti clicks
+// Approve on the card; the AI still has no PayPal tool. A first transfer
+// in a month is unaffected: no warning, no EXTRA label, no extra friction.
+
+function formatIdr(n: number): string {
+  return `Rp ${Math.round(n).toLocaleString('id-ID')}`;
+}
+
+/** Month-to-date remittances for one month (YYYY-MM), computed from the ledger — never from the model's numbers. */
+async function monthRemittanceSummary(monthYear: string): Promise<{ count: number; totalIdr: number }> {
+  const data = await getAppData();
+  const rows = data.remittances.filter((r) => r.monthYear === monthYear);
+  return { count: rows.length, totalIdr: rows.reduce((sum, r) => sum + (Number(r.amountIdr) || 0), 0) };
+}
+
+/** Has Siti confirmed this is an intentional EXTRA transfer? Explicit model flag, or her own words in this conversation. Note the word "extra" alone is NOT confirmation — saying "send 2M extra" is the request itself; confirmation is an explicit yes / go-ahead, or a stated emergency reason (hospital, accident, …). */
+function extraTransferConfirmed(req: AgentRequest, modelIsExtra?: boolean): boolean {
+  if (modelIsExtra) return true;
+  const turns = [req.message, ...req.history.filter((t) => t.role === 'user').map((t) => t.text)];
+  const text = turns.join(' ').toLowerCase();
+  return /(emergency|urgent|hospital|accident|hospitali[sz]ed|sick|send it anyway|go ahead|yes,?\s+send|confirm|yes,?\s+please)/.test(text);
+}
+
+/** Pull the reason for an EXTRA transfer out of Siti's own words when the model did not pass one: the part after "—" / "-" in the turn that states the emergency, or the whole turn. */
+function extractExtraReason(req: AgentRequest): string {
+  const turns = [req.message, ...req.history.filter((t) => t.role === 'user').map((t) => t.text)];
+  for (const turn of turns) {
+    if (/(emergency|urgent|hospital|accident|hospitali[sz]ed|sick)/i.test(turn)) {
+      const parts = turn.split(/[—-]/);
+      const candidate = (parts.length > 1 ? parts[parts.length - 1] : turn).trim();
+      return candidate.length > 3 ? candidate.slice(0, 120) : turn.trim().slice(0, 120);
+    }
+  }
+  return '';
+}
+
+type ApprovalResolution =
+  | { blocked: true; replyText: string }
+  | { blocked: false; draft: RemittanceApprovalDraft };
+
+async function resolveRemittanceApproval(
+  req: AgentRequest,
+  args: any,
+): Promise<ApprovalResolution> {
+  const amountIdr = Number(args?.amountIdr) || 0;
+  const monthYear = String(args?.monthYear || currentMonthYear());
+  // The USD amount is ALWAYS derived server-side from the approved IDR
+  // total at Rp 16,000/USD (display rate only) — override the model.
+  const derivedUsd = Number(idrToUsd(amountIdr));
+  const modelAmount = Number(args?.paypalAmount) || 0;
+  if (modelAmount !== derivedUsd) {
+    console.warn(
+      `[Agent] paypalAmount from model (${modelAmount}) overridden with derived USD ${derivedUsd} for Rp ${amountIdr}.`,
+    );
+  }
+  const summary = await monthRemittanceSummary(monthYear);
+  const reason = String(args?.reason || '').trim() || extractExtraReason(req);
+  const isExtra = summary.totalIdr > 0;
+  const monthTotalAfterIdr = summary.totalIdr + amountIdr;
+
+  if (isExtra && !extraTransferConfirmed(req, Boolean(args?.isExtra))) {
+    const replyText =
+      `⚠️ ${monthYear} already has ${formatIdr(summary.totalIdr)} sent (${summary.count} transfer${summary.count === 1 ? '' : 's'} so far). ` +
+      `This would be an EXTRA transfer of ${formatIdr(amountIdr)} — the total for ${monthYear} would become ${formatIdr(monthTotalAfterIdr)}. ` +
+      `I have NOT prepared an approval card yet, because a second transfer in the same month is usually a mistake. ` +
+      `If this is a real extra need or emergency, please confirm and tell me what it is for — for example: "Yes, send 2M extra — Slamet is in hospital" — and I will show you an EXTRA approval card to approve.`;
+    return { blocked: true, replyText };
+  }
+
+  return {
+    blocked: false,
+    draft: {
+      type: 'remittance_approval',
+      amountIdr,
+      monthYear,
+      allocations: (args?.allocations || {}) as Record<string, number>,
+      paypalAmount: derivedUsd,
+      currency: 'USD',
+      note: String(args?.note || ''),
+      isExtra,
+      reason: isExtra ? reason : '',
+      monthRemittanceTotalIdr: summary.totalIdr,
+      monthTotalAfterIdr,
+    },
   };
 }
 
@@ -398,7 +516,7 @@ IMPORTANT: Always reply in English, even though the family is Indonesian, the le
 
 The current user is ${user.name} (role: ${user.role}, in ${user.location}).
 ${isSiti
-  ? `As Siti, you help her PLAN and SEND remittances. When she describes a remittance with allocations, structure it and ALWAYS call request_remittance_approval — never send money yourself. Siti must approve in the UI; only then does the PayPal Payouts flow start (server creates a payout batch from her own business account to Slamet). You may also set the monthly budget (set_monthly_budget), schedule calendar events (add_calendar_event), and review pending receipts (update_receipt_status).`
+  ? `As Siti, you help her PLAN and SEND remittances. When she describes a remittance with allocations, structure it and ALWAYS call request_remittance_approval — never send money yourself. Siti must approve in the UI; only then does the PayPal Payouts flow start (server creates a payout batch from her own business account to Slamet). You may also set the monthly budget (set_monthly_budget), schedule calendar events (add_calendar_event), and review pending receipts (update_receipt_status). EXTRA / emergency transfers: a second transfer in a month that already has one is ALLOWED — emergencies happen (accident, hospitalisation) — but it is never a normal monthly remittance and never silent. If the ledger already shows a transfer for that month, first warn Siti with the existing total and the new month total, ask whether it is an extra/emergency transfer and what it is for, and do NOT call request_remittance_approval until she confirms. When she confirms, call it with isExtra: true and the reason she gave, so the card is labelled EXTRA. A first transfer in a month has no extra friction.`
   : `As Slamet, you help him LOG spending and SCHEDULE tasks. When he attaches a receipt photo, READ it, extract the vendor, amount, and what was bought, choose the best category, and call add_expense. Assess the photo honestly: if it looks clear, call add_expense with "pending" and note that it looks clear — only Siti can mark a receipt "verified"; if unclear or you can't tell -> "pending" (Siti will review); if blurry, edited, or unreadable -> "needs_clarification" (ask Slamet to re-upload a clearer photo). Never accuse anyone of fraud. Put the photo data URL into receiptDataUrl so it's stored. Slamet can also schedule tasks and reminders via add_calendar_event.`}
 
 Always reply in English. Be concise and warm. Amounts in IDR. Use the tools to act; don't describe actions you can perform via tools.`;
@@ -478,28 +596,21 @@ async function runGeminiAgent(req: AgentRequest): Promise<AgentResponse> {
       // Human-in-the-loop: intercept the approval request and surface it to the UI.
       const approval = fcs.find((fc) => fc.name === 'request_remittance_approval');
       if (approval) {
-        // The USD amount is ALWAYS derived server-side from the approved IDR
-        // total at Rp 16,000/USD (display rate only) — override the model.
-        const amountIdr = Number(approval.args?.amountIdr) || 0;
-        const derivedUsd = Number(idrToUsd(amountIdr));
-        const modelAmount = Number(approval.args?.paypalAmount) || 0;
-        if (modelAmount !== derivedUsd) {
-          console.warn(
-            `[Agent] paypalAmount from model (${modelAmount}) overridden with derived USD ${derivedUsd} for Rp ${amountIdr}.`
-          );
+        // EXTRA guard (server-enforced): a duplicate-month draft is blocked
+        // until Siti confirms it is an intentional extra/emergency transfer.
+        const resolved = await resolveRemittanceApproval(req, approval.args || {});
+        if (resolved.blocked) {
+          return { reply: { text: resolved.replyText }, sideEffects };
         }
+        const draft = resolved.draft;
         return {
           reply: {
-            text: response.text || 'I have prepared a remittance for your approval. Please review and approve to send via PayPal.',
-            pendingAction: {
-              type: 'remittance_approval',
-              amountIdr,
-              monthYear: String(approval.args?.monthYear || currentMonthYear()),
-              allocations: (approval.args?.allocations || {}) as Record<string, number>,
-              paypalAmount: derivedUsd,
-              currency: 'USD',
-              note: String(approval.args?.note || ''),
-            },
+            text:
+              response.text ||
+              (draft.isExtra
+                ? 'I have prepared an EXTRA remittance for your approval. Please review it carefully and approve to send via PayPal.'
+                : 'I have prepared a remittance for your approval. Please review and approve to send via PayPal.'),
+            pendingAction: draft,
           },
           sideEffects,
         };
@@ -663,24 +774,21 @@ async function runOpenRouterAgent(req: AgentRequest): Promise<AgentResponse> {
       const approval = toolCalls.find((tc: any) => tc.function?.name === 'request_remittance_approval');
       if (approval) {
         const args = JSON.parse(approval.function.arguments || '{}');
-        const amountIdr = Number(args.amountIdr) || 0;
-        const derivedUsd = Number(idrToUsd(amountIdr));
-        const modelAmount = Number(args.paypalAmount) || 0;
-        if (modelAmount !== derivedUsd) {
-          console.warn(`[NIM] paypalAmount from model (${modelAmount}) overridden with ${derivedUsd} for Rp ${amountIdr}.`);
+        // EXTRA guard (server-enforced): a duplicate-month draft is blocked
+        // until Siti confirms it is an intentional extra/emergency transfer.
+        const resolved = await resolveRemittanceApproval(req, args);
+        if (resolved.blocked) {
+          return { reply: { text: resolved.replyText }, sideEffects };
         }
+        const draft = resolved.draft;
         return {
           reply: {
-            text: msg.content || 'I have prepared a remittance for your approval. Please review and approve to send via PayPal.',
-            pendingAction: {
-              type: 'remittance_approval',
-              amountIdr,
-              monthYear: String(args.monthYear || currentMonthYear()),
-              allocations: (args.allocations || {}) as Record<string, number>,
-              paypalAmount: derivedUsd,
-              currency: 'USD',
-              note: String(args.note || ''),
-            },
+            text:
+              msg.content ||
+              (draft.isExtra
+                ? 'I have prepared an EXTRA remittance for your approval. Please review it carefully and approve to send via PayPal.'
+                : 'I have prepared a remittance for your approval. Please review and approve to send via PayPal.'),
+            pendingAction: draft,
           },
           sideEffects,
         };
@@ -789,18 +897,27 @@ async function _runMockAgent(req: AgentRequest): Promise<AgentResponse> {
         Object.keys(allocations).length > 0
           ? allocations
           : { renovation: 5_000_000, tuition: 3_500_000, allowance: 4_000_000, savings: 2_500_000, miscellaneous: 0 };
+      // EXTRA guard (server-enforced, same as the LLM paths): a duplicate-month
+      // draft is blocked until Siti confirms it is an intentional extra.
+      const resolved = await resolveRemittanceApproval(req, {
+        amountIdr,
+        monthYear: currentMonthYear(),
+        allocations: finalAlloc,
+        paypalAmount: Number(idrToUsd(amountIdr)),
+        currency: 'USD',
+        note: 'Monthly remittance prepared by RemitPal AI (mock).',
+      });
+      if (resolved.blocked) {
+        return { reply: { text: `(mock mode) ${resolved.replyText}` }, sideEffects: [] };
+      }
+      const draft = resolved.draft;
+      const extraLine = draft.isExtra
+        ? ` This is an EXTRA transfer — ${draft.monthYear} already has Rp ${(draft.monthRemittanceTotalIdr || 0).toLocaleString('id-ID')} sent, so the total after this would be Rp ${(draft.monthTotalAfterIdr || amountIdr).toLocaleString('id-ID')}.`
+        : '';
       return {
         reply: {
-          text: `(mock mode) I structured your remittance of Rp ${amountIdr.toLocaleString('id-ID')} with the allocations below. Review and approve to send it to Slamet via PayPal.`,
-          pendingAction: {
-            type: 'remittance_approval',
-            amountIdr,
-            monthYear: currentMonthYear(),
-            allocations: finalAlloc,
-            paypalAmount: Number(idrToUsd(amountIdr)),
-            currency: 'USD',
-            note: 'Monthly remittance prepared by RemitPal AI (mock).',
-          },
+          text: `(mock mode) I structured your remittance of Rp ${amountIdr.toLocaleString('id-ID')} with the allocations below.${extraLine} Review and approve to send it to Slamet via PayPal.`,
+          pendingAction: draft,
         },
         sideEffects: [],
       };

@@ -412,6 +412,13 @@ export interface RemittanceApprovalDraft {
   paypalAmount: number;
   currency: string;
   note: string;
+  // EXTRA / emergency transfer — set server-side from the ledger. True exactly
+  // when the month already has a remittance; monthTotalAfterIdr is the
+  // server-computed month total after this transfer.
+  isExtra?: boolean;
+  reason?: string;
+  monthRemittanceTotalIdr?: number;
+  monthTotalAfterIdr?: number;
 }
 
 export interface AgentReply {
