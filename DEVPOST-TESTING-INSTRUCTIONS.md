@@ -1,7 +1,8 @@
 # RemitPal — Devpost testing instructions (paste-ready draft)
 
-Prepared 2026-11-12 (WIB), for the `payouts-personal-app` branch of
-`musenesia/remitpal`. This file contains PLACEHOLDERS only — never real
+Prepared 2026-11-12 (WIB), for the `main` branch of
+`musenesia/remitpal` (the `payouts-personal-app` branch was merged
+into `main` in PR #3). This file contains PLACEHOLDERS only — never real
 credentials. Replace the placeholders with real values ONLY in the
 Devpost testing-instructions field itself (visible to judges), never
 in this file, never in the public repo, never on the demo page,
@@ -159,12 +160,33 @@ Blueprint: `render.yaml` (free web service + free PostgreSQL
 database `remitpal-db`). From the Render Dashboard → New →
 Blueprint → point to this repo. Set these env vars in the
 Render dashboard (all `sync: false` in `render.yaml`):
-`GEMINI_API_KEY`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`,
+`GEMINI_API_KEY` (and/or `OPENROUTER_API_KEY` + `OPENROUTER_MODEL`,
+which defaults to `nvidia/nemotron-3.5-super-vl:free`),
+`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`,
 `PAYPAL_RECIPIENT_EMAIL`. `FONNTE_TOKEN` is optional
 (WhatsApp notifications are silently skipped without it).
 Health check is `GET /api/health` (returns `{ok:true}`).
 Before filming, check the sandbox business account balance is
 at least USD 937.50 — a payout fails on insufficient funds.
+
+## Deploy your own copy (judges — one click)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/musenesia/remitpal)
+
+A judge can host their own replica of RemitPal on Render with the
+button above: sign in to Render with GitHub, authorize the repo,
+name the Blueprint, and Render provisions the free PostgreSQL
+database and web service from `render.yaml`. When prompted, supply
+your own keys: a Gemini API key and/or an OpenRouter API key
+(`OPENROUTER_MODEL` defaults to `nvidia/nemotron-3.5-super-vl:free`),
+plus your own PayPal sandbox REST app credentials
+(`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`) and the recipient
+email (`PAYPAL_RECIPIENT_EMAIL` — the Slamet sandbox personal
+account). Set `APP_URL` to the Render service URL after the first
+deploy. Without PayPal credentials the copy runs in labelled
+DEMO MODE (mock payout batches, no fake payment); without any AI
+key the agent falls back to the labelled rule-based mock. The free
+web service sleeps after inactivity, so the first load is slow.
 
 Notes: a free Render web service sleeps after ~15 minutes idle
 and takes about a minute to wake — that is expected, not a
@@ -193,7 +215,10 @@ Keep the Render service live until judging ends.
 
 - PayPal Payouts v1 (sandbox)
 - Gemini 3.8 Flash (`@google/genai`, function calling +
-  multimodal vision)
+  multimodal vision), with an OpenRouter fallback
+  (`nvidia/nemotron-3.5-super-vl:free`, Nvidia) used automatically
+  when Gemini is overloaded (503/429) — including receipt-photo
+  vision and expense categorisation
 - PostgreSQL
 - Render — only once actually deployed (until the deploy is
   confirmed, say "Render (deployment planned, not yet live)")
@@ -237,8 +262,8 @@ on this sandbox app (403 NOT_AUTHORIZED).
   submitting — do not rely on this file as the deadline source.
 - Link the demo URL in three places once verified: the Devpost
   submission, the repo README, and the video end card.
-- Still owed at time of writing (2026-11-12): merge
-  `payouts-personal-app` into `main`, make the repo public,
+- Still owed at time of writing (2026-11-12): make the repo public
+  (`payouts-personal-app` was merged into `main` in PR #3),
   Render deploy + real-browser check, credentialed sandbox
   Payouts run (with sandbox business balance ≥ USD 937.50),
   credentialed Gemini run, under-3-minute video. None of these
