@@ -128,7 +128,11 @@ export const ChatBar: React.FC<ChatBarProps> = ({
 
       if (!result.success || !result.reply) {
         const errMsg = result.error || 'The agent could not respond. Please try again.';
-        if (/unauthorized|session|token|log in/i.test(errMsg)) {
+        // Only a genuine 401 (our token rejected) is a session-expiry case.
+        // Do NOT pattern-match the error text — a Gemini API rejection often
+        // contains the word "token", which would falsely read as "session
+        // expired" and send the user to a login modal that cannot help.
+        if (result.unauthorized) {
           setError('Your session expired. Please log in again.');
           onOpenAuthModal();
         } else {

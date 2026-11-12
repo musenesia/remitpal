@@ -581,9 +581,10 @@ app.delete('/api/calendar-events/:id', requireAuth, async (req: Request, res: Re
 });
 
 // Reset Database to Seed Data — remitter only (destructive).
-app.post('/api/reset', requireAuth, requireRole('remitter'), async (_req: Request, res: Response) => {
+app.post('/api/reset', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
   try {
-    await resetDatabase();
+    // Preserve the caller's own session so a reset doesn't log them out.
+    await resetDatabase((req as any).token);
     const data = await getAppData();
     res.json({ success: true, data });
   } catch (err: any) {

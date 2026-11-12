@@ -12,6 +12,22 @@ export function idrToUsdDisplay(amountIdr: number): string {
   return (Number(amountIdr) / IDR_PER_USD).toFixed(2);
 }
 
+/**
+ * Safely parse a Response as JSON. Reads the body as text first so a non-JSON
+ * response (HTML error page from a proxy/CDN) surfaces a readable error
+ * instead of the cryptic "Unexpected token '<'" parse failure.
+ */
+async function safeJson(res: Response): Promise<any> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Server returned non-JSON (HTTP ${res.status}): ${text.slice(0, 200)}`
+    );
+  }
+}
+
 export function getStoredAuth(): { user: UserProfile | null; token: string | null } {
   try {
     const token = localStorage.getItem(TOKEN_KEY);
@@ -48,8 +64,14 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(input, { ...init, headers });
   if (res.status === 401) {
+    // A genuine 401 means OUR session token was rejected (expired/invalid).
+    // Mark the error so callers can distinguish a real session failure from
+    // other errors (e.g. a Gemini API failure whose message happens to
+    // contain the word "token") — do NOT use free-text pattern matching.
     saveStoredAuth(null, null);
-    throw new Error('Unauthorized: session expired or invalid — please log in again.');
+    const err = new Error('Unauthorized: session expired or invalid — please log in again.');
+    (err as any).isUnauthorized = true;
+    throw err;
   }
   return res;
 }
@@ -64,9 +86,10 @@ export async function fetchAppData(): Promise<{ data: AppData; fromServer: boole
       return { data: json.data, fromServer: true };
     }
   } catch (err: any) {
-    // A 401 must NOT fall back silently to the local seed as if it were
-    // server data: report it so the UI can prompt login instead.
-    if (err?.message && String(err.message).includes('Unauthorized')) {
+    // A genuine 401 must NOT fall back silently to local seed data: report it
+    // so the UI can prompt login instead. Use the typed flag set by apiFetch,
+    // not free-text matching, so other errors don't trigger a false logout.
+    if (err?.isUnauthorized) {
       return { data: loadAppData(), fromServer: false, unauthorized: true };
     }
     console.warn('[RemitPal] Server offline or unreachable, using local storage:', err);
@@ -200,7 +223,7 @@ export async function loginApi(username: string, password: string): Promise<{ su
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) {
       return { success: false, error: data.error || 'Login failed' };
     }
@@ -360,7 +383,7 @@ export async function createPersonalPaymentToken(params: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) return { success: false, error: data.error || 'PayPal token creation failed.' };
     return { success: true, token: data.token as PersonalPaymentTokenResult };
   } catch (err: any) {
@@ -378,7 +401,7 @@ export interface GetPersonalPaymentTokenResult {
 export async function getPersonalPaymentToken(tokenId: string): Promise<GetPersonalPaymentTokenResult> {
   try {
     const res = await apiFetch(`/api/paypal/personal-payments/tokens/${encodeURIComponent(tokenId)}`);
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) return { success: false, error: data.error || 'Token lookup failed.' };
     return {
       success: true,
@@ -420,7 +443,7 @@ export async function recordManualPersonalPayment(params: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) return { success: false, error: data.error || 'Manual record failed.' };
     return { success: true, referenceNo: data.referenceNo, mock: data.mock };
   } catch (err: any) {
@@ -500,6 +523,8 @@ export interface AgentChatResponse {
   reply?: AgentReply;
   sideEffects?: string[];
   error?: string;
+  /** True only when the failure was a genuine 401 — our session token was rejected. */
+  unauthorized?: boolean;
 }
 
 export interface AgentHistoryTurn {
@@ -524,10 +549,18 @@ export async function sendAgentMessage(params: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    const data = await res.json();
+
+    // safeJson reads as text first so a non-JSON error page surfaces a readable
+    // message instead of the cryptic "Unexpected token '<'" parse failure.
+    const data = await safeJson(res);
     if (!res.ok) return { success: false, error: data.error || 'Agent request failed.' };
     return data as AgentChatResponse;
   } catch (err: any) {
+    // Only a real 401 (our token rejected) is a session problem. Other thrown
+    // errors (network, etc.) are surfaced as-is — never misreported as logout.
+    if (err?.isUnauthorized) {
+      return { success: false, unauthorized: true, error: err.message || 'Your session expired.' };
+    }
     return { success: false, error: err.message || 'Network error contacting the agent.' };
   }
 }

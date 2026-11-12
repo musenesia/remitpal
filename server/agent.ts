@@ -90,7 +90,7 @@ function getClient(): GoogleGenAI | null {
 }
 
 export function isAgentEnabled(): boolean {
-  return !!process.env.GEMINI_API_KEY || process.env.AGENT_MOCK === 'true';
+  return !!process.env.GEMINI_API_KEY || !!process.env.OPENROUTER_API_KEY || process.env.AGENT_MOCK === 'true';
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +421,37 @@ function buildContents(req: AgentRequest): any[] {
   return contents;
 }
 
+// ---------------------------------------------------------------------------
+// Retry helper — Gemini 503 / 429 are transient; back off and retry up to 3×.
+// ---------------------------------------------------------------------------
+
+async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 2): Promise<T> {
+  const RETRYABLE = new Set([429, 503]);
+  let lastErr: any;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      // Extract HTTP status from Google GenAI error (varies by SDK version).
+      const status: number =
+        err?.status ??
+        err?.code ??
+        err?.response?.status ??
+        (typeof err?.message === 'string'
+          ? parseInt((err.message.match(/"code"\s*:\s*(\d+)/) || [])[1] ?? '', 10)
+          : NaN);
+
+      if (!RETRYABLE.has(status) || attempt === maxAttempts || err?.name === 'AbortError') throw err;
+
+      const delayMs = 500; // single short pause before the one retry
+      console.warn(`[Agent] Gemini ${status} on attempt ${attempt}/${maxAttempts}, retrying in ${delayMs}ms…`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 async function runGeminiAgent(req: AgentRequest): Promise<AgentResponse> {
   const ai = getClient();
   if (!ai) return runMockAgent(req);
@@ -430,10 +461,16 @@ async function runGeminiAgent(req: AgentRequest): Promise<AgentResponse> {
   const toolConfig = [{ functionDeclarations: tools }];
 
   for (let i = 0; i < 6; i++) {
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents,
-      config: { tools: toolConfig, systemInstruction: systemPrompt(req.user) },
+    const response = await withRetry(() => {
+      // 20 s per Gemini call — fast-fail so the NIM fallback has time to run
+      // within nginx's 60 s proxy window.
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 20_000);
+      return ai.models.generateContent({
+        model: MODEL,
+        contents,
+        config: { tools: toolConfig, systemInstruction: systemPrompt(req.user), abortSignal: controller.signal as any },
+      }).finally(() => clearTimeout(tid));
     });
 
     const fcs = response.functionCalls as FunctionCall[] | undefined;
@@ -491,6 +528,183 @@ async function runGeminiAgent(req: AgentRequest): Promise<AgentResponse> {
 
     // No tool calls — final assistant text.
     return { reply: { text: response.text || '' }, sideEffects };
+  }
+
+  return { reply: { text: "I wasn't able to complete that. Could you rephrase?" }, sideEffects };
+}
+
+// ---------------------------------------------------------------------------
+// OpenRouter fallback agent (OpenAI-compatible, nvidia/nemotron-3.5-super-vl)
+// ---------------------------------------------------------------------------
+// Used automatically when Gemini returns 503 / 429 (overloaded / rate-limited).
+// OpenRouter exposes an OpenAI-wire-compatible endpoint — no extra SDK needed.
+// Model: nvidia/nemotron-3.5-super-vl:free — free tier, multimodal, tool calling.
+
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'nvidia/nemotron-3.5-super-vl:free';
+
+/** Convert Gemini-style FunctionDeclaration[] → OpenAI tool[] */
+function geminiToolsToOpenAI(): any[] {
+  return tools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters ?? { type: 'object', properties: {} },
+    },
+  }));
+}
+
+/** Build an OpenAI-style messages array from AgentRequest history + current turn. */
+function buildNimMessages(req: AgentRequest): any[] {
+  const msgs: any[] = [{ role: 'system', content: systemPrompt(req.user) }];
+
+  for (const turn of req.history) {
+    msgs.push({ role: turn.role === 'user' ? 'user' : 'assistant', content: turn.text });
+  }
+
+  // muse-glimmer-30b is natively multimodal — pass the real image when present
+  // using the OpenAI vision content-parts format.
+  if (req.image) {
+    const imagePart = {
+      type: 'image_url',
+      image_url: { url: `data:${req.image.mimeType};base64,${req.image.data}` },
+    };
+    const textPart = { type: 'text', text: req.message };
+    msgs.push({ role: 'user', content: [textPart, imagePart] });
+  } else {
+    msgs.push({ role: 'user', content: req.message });
+  }
+
+  return msgs;
+}
+
+async function callOpenRouter(messages: any[], toolChoice: 'auto' | 'none' = 'auto'): Promise<any> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set.');
+
+  const body = {
+    model: OPENROUTER_MODEL,
+    messages,
+    tools: geminiToolsToOpenAI(),
+    tool_choice: toolChoice,
+    max_tokens: 1024,
+  };
+
+  // 25 s hard timeout — leaves room for nginx's 60 s proxy timeout even when
+  // Gemini already spent a few seconds retrying before the fallback.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25_000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        // OpenRouter requires these headers for attribution on the free tier.
+        'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
+        'X-Title': 'RemitPal',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err?.name === 'AbortError') {
+      throw new Error(`OpenRouter request timed out after 25 s (model: ${OPENROUTER_MODEL}).`);
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    const err: any = new Error(`OpenRouter ${res.status}: ${text.slice(0, 400)}`);
+    err.status = res.status;
+    throw err;
+  }
+
+  // Read as text first so a non-JSON body surfaces a readable error.
+  const rawText = await res.text();
+  if (!rawText.trimStart().startsWith('{') && !rawText.trimStart().startsWith('[')) {
+    const err: any = new Error(
+      `OpenRouter returned non-JSON (status ${res.status}). Body: ${rawText.slice(0, 400)}`
+    );
+    err.status = res.status;
+    throw err;
+  }
+  return JSON.parse(rawText);
+}
+
+async function runOpenRouterAgent(req: AgentRequest): Promise<AgentResponse> {
+  if (!process.env.OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY is not set.');
+  console.log(`[Agent] Falling back to OpenRouter (${OPENROUTER_MODEL})…`);
+
+  const messages: any[] = buildNimMessages(req);
+  const sideEffects: string[] = [];
+
+  // Agentic loop — up to 6 turns (same cap as Gemini path).
+  for (let i = 0; i < 6; i++) {
+    const data = await callOpenRouter(messages);
+    const choice = data.choices?.[0];
+    const msg = choice?.message;
+
+    if (!msg) throw new Error('NIM returned an empty response.');
+
+    const toolCalls: any[] = msg.tool_calls ?? [];
+
+    if (toolCalls.length > 0) {
+      // Append the assistant's turn (with tool_calls) before the results.
+      messages.push({ role: 'assistant', content: msg.content ?? null, tool_calls: toolCalls });
+
+      // Human-in-the-loop: intercept request_remittance_approval.
+      const approval = toolCalls.find((tc: any) => tc.function?.name === 'request_remittance_approval');
+      if (approval) {
+        const args = JSON.parse(approval.function.arguments || '{}');
+        const amountIdr = Number(args.amountIdr) || 0;
+        const derivedUsd = Number(idrToUsd(amountIdr));
+        const modelAmount = Number(args.paypalAmount) || 0;
+        if (modelAmount !== derivedUsd) {
+          console.warn(`[NIM] paypalAmount from model (${modelAmount}) overridden with ${derivedUsd} for Rp ${amountIdr}.`);
+        }
+        return {
+          reply: {
+            text: msg.content || 'I have prepared a remittance for your approval. Please review and approve to send via PayPal.',
+            pendingAction: {
+              type: 'remittance_approval',
+              amountIdr,
+              monthYear: String(args.monthYear || currentMonthYear()),
+              allocations: (args.allocations || {}) as Record<string, number>,
+              paypalAmount: derivedUsd,
+              currency: 'USD',
+              note: String(args.note || ''),
+            },
+          },
+          sideEffects,
+        };
+      }
+
+      // Execute all other tool calls and feed results back.
+      for (const tc of toolCalls) {
+        const name: string = tc.function?.name ?? '';
+        let args: any = {};
+        try { args = JSON.parse(tc.function?.arguments || '{}'); } catch { /* ignore */ }
+        const result = await executeTool(name, args, req.user);
+        if (MUTATING_TOOLS.has(name)) sideEffects.push(name);
+        messages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: JSON.stringify(result),
+        });
+      }
+      continue;
+    }
+
+    // No tool calls — final text response.
+    const text = msg.content ?? '';
+    return { reply: { text }, sideEffects };
   }
 
   return { reply: { text: "I wasn't able to complete that. Could you rephrase?" }, sideEffects };
@@ -648,20 +862,51 @@ async function _runMockAgent(req: AgentRequest): Promise<AgentResponse> {
 // ---------------------------------------------------------------------------
 
 export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
-  const useMock = process.env.AGENT_MOCK === 'true' || !process.env.GEMINI_API_KEY;
+  const useMock = process.env.AGENT_MOCK === 'true' || (!process.env.GEMINI_API_KEY && !process.env.OPENROUTER_API_KEY);
   if (useMock) {
     return runMockAgent(req);
   }
-  // Real Gemini path. Surface errors honestly instead of silently swapping in
-  // mock replies — otherwise the UI would display fake output as if it were
-  // real AI, which defeats the point of the live integration.
-  try {
-    return await runGeminiAgent(req);
-  } catch (err: any) {
-    console.error('[Agent] Gemini call failed:', err);
-    const detail = err?.message ? ` ${err.message}` : '';
-    throw new Error(
-      `Gemini AI call failed.${detail} Verify GEMINI_API_KEY is valid (https://aistudio.google.com/app/apikey).`
-    );
+
+  // ── Primary: Gemini ──────────────────────────────────────────────────────
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      return await runGeminiAgent(req);
+    } catch (err: any) {
+      const raw: string = err?.message ?? '';
+      // Treat our own 20 s AbortError as an overload: Gemini was too slow,
+      // which is functionally the same as a 503 from our perspective.
+      const isOverload =
+        err?.name === 'AbortError' ||
+        /503|429|UNAVAILABLE|quota|high demand|rate.?limit|aborted|timed? ?out/i.test(raw);
+
+      if (isOverload && process.env.OPENROUTER_API_KEY) {
+        console.warn('[Agent] Gemini overloaded, falling back to OpenRouter…');
+      } else if (isOverload) {
+        throw new Error('The Gemini model is temporarily overloaded. Please wait a moment and try again.');
+      } else {
+        console.error('[Agent] Gemini call failed:', err);
+        const detail = raw ? ` ${raw}` : '';
+        throw new Error(
+          `Gemini AI call failed (model: ${MODEL}).${detail} Verify GEMINI_API_KEY is valid and the model is available for your key (https://aistudio.google.com/app/apikey).`
+        );
+      }
+    }
   }
+
+  // ── Fallback: OpenRouter ─────────────────────────────────────────────────
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      return await runOpenRouterAgent(req);
+    } catch (err: any) {
+      console.error('[Agent] OpenRouter call failed:', err);
+      const raw: string = err?.message ?? '';
+      const detail = raw ? ` ${raw}` : '';
+      throw new Error(
+        `AI request failed on both providers. Gemini was overloaded; OpenRouter (${OPENROUTER_MODEL}) also failed.${detail}`
+      );
+    }
+  }
+
+  // Should not reach here, but guard anyway.
+  throw new Error('No AI provider is configured. Set GEMINI_API_KEY or OPENROUTER_API_KEY.');
 }
