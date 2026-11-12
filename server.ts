@@ -460,14 +460,31 @@ app.get('/api/paypal/status/:batchId', requireAuth, async (req: Request, res: Re
  * the available tools). Accepts an optional receipt image (base64).
  */
 app.post('/api/agent/chat', requireAuth, async (req: Request, res: Response) => {
+  // Hard-kill the Express response after 55 s — safely inside nginx's 60 s
+  // proxy window. This prevents the client seeing a raw 504 HTML page; instead
+  // the app gets a proper JSON error it can display in the chat bar.
+  const AGENT_TIMEOUT_MS = 55_000;
+  let timedOut = false;
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true;
+    if (!res.headersSent) {
+      res.status(504).json({
+        error: 'The AI request timed out (the model is under high load). Please try again in a moment.',
+        code: 'AGENT_TIMEOUT',
+      });
+    }
+  }, AGENT_TIMEOUT_MS);
+
   try {
     const user = (req as any).user as UserProfile;
     const { message, image, history } = req.body || {};
 
     if (!message && !image) {
+      clearTimeout(timeoutHandle);
       return res.status(400).json({ error: 'A message or image is required.' });
     }
     if (!isAgentEnabled()) {
+      clearTimeout(timeoutHandle);
       return res.status(503).json({
         error: 'AI agent is not configured. Set GEMINI_API_KEY (or AGENT_MOCK=true for a demo).',
       });
@@ -481,10 +498,16 @@ app.post('/api/agent/chat', requireAuth, async (req: Request, res: Response) => 
     };
 
     const result = await runAgent(agentReq);
-    res.json({ success: true, reply: result.reply, sideEffects: result.sideEffects });
+    clearTimeout(timeoutHandle);
+    if (!timedOut && !res.headersSent) {
+      res.json({ success: true, reply: result.reply, sideEffects: result.sideEffects });
+    }
   } catch (err: any) {
-    console.error('[Agent Chat Error]:', err);
-    res.status(500).json({ error: err.message || 'Agent failed.' });
+    clearTimeout(timeoutHandle);
+    console.error('[Agent Chat Error]:', err?.message ?? err);
+    if (!timedOut && !res.headersSent) {
+      res.status(500).json({ error: err.message || 'Agent failed.' });
+    }
   }
 });
 
