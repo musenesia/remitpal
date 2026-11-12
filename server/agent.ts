@@ -34,7 +34,6 @@ import {
   updateExpenseReceipt,
   addNotification,
 } from './db.ts';
-import { broadcastEventNotification } from './whatsapp.ts';
 import { idrToUsd } from './paypal.ts';
 import type { UserProfile, CategoryId } from '../src/types';
 
@@ -291,7 +290,7 @@ async function addExpense(args: any, user: UserProfile) {
   };
   await upsertExpense(expense);
 
-  // Mirror the manual expense flow: create an activity notification + WhatsApp.
+  // Mirror the manual expense flow: create an activity notification.
   try {
     const isReceipt = !!expense.receiptUrl;
     const formatted = `Rp ${expense.amountIdr.toLocaleString('id-ID')}`;
@@ -308,9 +307,8 @@ async function addExpense(args: any, user: UserProfile) {
       category: expense.categoryId,
       amountIdr: expense.amountIdr,
     });
-    await broadcastEventNotification(notifTitle, notifDesc, user.name);
   } catch (e) {
-    console.warn('[Agent] notification/broadcast failed:', e);
+    console.warn('[Agent] notification failed:', e);
   }
 
   return { success: true, expenseId: id, categoryId: expense.categoryId, amountIdr: expense.amountIdr, receiptStatus: expense.receiptStatus };
@@ -330,9 +328,8 @@ async function updateReceiptStatus(args: any, user: UserProfile) {  await update
       description: notifDesc,
       relatedId: args.expenseId,
     });
-    await broadcastEventNotification(notifTitle, notifDesc, user.name);
   } catch (e) {
-    console.warn('[Agent] notification/broadcast failed:', e);
+    console.warn('[Agent] notification failed:', e);
   }
   return { success: true, expenseId: args.expenseId, status: args.status };
 }
@@ -745,12 +742,23 @@ function parseAllocations(text: string): Record<string, number> {
 function parseTotalAmount(text: string): number {
   // "15 million", "15M", "15000000", "15 juta"
   const m = text.match(/(\d+(?:\.\d+)?)\s*(m|million|jt|juta)\b/i);
-  if (m) return Math.round(parseFloat(m[1]) * 1_000_000);
+  if (m) {
+    const val = Math.round(parseFloat(m[1]) * 1_000_000);
+    return val <= 500_000_000 ? val : 0;
+  }
   // "price 650,000" or "650.000" or "650000"
   const comma = text.match(/(?:price|harga|rp\.?|idr)?\s*(\d{1,3}(?:[.,]\d{3})+)/i);
-  if (comma) return parseInt(comma[1].replace(/[.,]/g, ''), 10);
-  const n = text.match(/\b(\d{4,})\b/);
-  return n ? parseInt(n[1], 10) : 0;
+  if (comma) {
+    const val = parseInt(comma[1].replace(/[.,]/g, ''), 10);
+    return val <= 500_000_000 ? val : 0;
+  }
+  // Cap at 9 digits max (up to Rp 999,999,999) to avoid matching 13-digit millisecond timestamps
+  const n = text.match(/\b(\d{4,9})\b/);
+  if (n) {
+    const val = parseInt(n[1], 10);
+    return val <= 500_000_000 ? val : 0;
+  }
+  return 0;
 }
 
 // Keyword → category mapping for the mock agent

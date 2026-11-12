@@ -393,6 +393,10 @@ export default function App() {
 
   // Reset database handler (wipes and re-seeds PostgreSQL, resets UI)
   const handleResetDatabase = async () => {
+    // Always clear localStorage first so corrupted cached data can't survive
+    // a reset even when the server is temporarily unreachable.
+    saveAppData(INITIAL_DATA);
+    setData(INITIAL_DATA);
     const fresh = await resetDatabaseApi();
     if (fresh) {
       setData(fresh);

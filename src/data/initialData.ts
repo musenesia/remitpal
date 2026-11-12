@@ -57,11 +57,11 @@ export const INITIAL_DATA: AppData = {
       monthYear: "2026-11",
       amountIdr: 15000000,
       amountHkd: 7520,
-      transferService: "BRI Remittance Hong Kong",
+      transferService: "PayPal",
       sender: "Siti Rahayu (HK)",
-      receiver: "Slamet Widodo (BRI Indramayu)",
-      referenceNo: "HKBR2611029841",
-      notes: "November salary remittance sent right after payday.",
+      receiver: "Slamet Widodo (PayPal)",
+      referenceNo: "PAYPAL-2611-29841",
+      notes: "November salary remittance sent via PayPal right after payday.",
       status: "received"
     },
     {
@@ -70,11 +70,11 @@ export const INITIAL_DATA: AppData = {
       monthYear: "2026-10",
       amountIdr: 15000000,
       amountHkd: 7510,
-      transferService: "Bank Mandiri Remittance HK",
+      transferService: "PayPal",
       sender: "Siti Rahayu (HK)",
-      receiver: "Slamet Widodo (Mandiri Indramayu)",
-      referenceNo: "HKMD2610028120",
-      notes: "October transfer received intact.",
+      receiver: "Slamet Widodo (PayPal)",
+      referenceNo: "PAYPAL-2610-28120",
+      notes: "October PayPal transfer received intact.",
       status: "received"
     },
     {
@@ -83,11 +83,11 @@ export const INITIAL_DATA: AppData = {
       monthYear: "2026-09",
       amountIdr: 15000000,
       amountHkd: 7490,
-      transferService: "BRI Remittance Hong Kong",
+      transferService: "PayPal",
       sender: "Siti Rahayu (HK)",
-      receiver: "Slamet Widodo (BRI Indramayu)",
-      referenceNo: "HKBR2609021455",
-      notes: "September transfer successfully deposited.",
+      receiver: "Slamet Widodo (PayPal)",
+      referenceNo: "PAYPAL-2609-21455",
+      notes: "September PayPal transfer successfully received.",
       status: "received"
     }
   ],
@@ -104,7 +104,7 @@ export const INITIAL_DATA: AppData = {
       paidBy: "Slamet Widodo",
       receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
-      verificationNotes: "Receipt checked on WhatsApp video call. Tile quality approved.",
+      verificationNotes: "Receipt checked via video call. Tile quality approved.",
       verifiedAt: "2026-11-04"
     },
     {
@@ -132,7 +132,7 @@ export const INITIAL_DATA: AppData = {
       paidBy: "Slamet Widodo",
       receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
-      verificationNotes: "School bank transfer receipt with stamp verified.",
+      verificationNotes: "Official school receipt with stamp verified.",
       verifiedAt: "2026-11-03"
     },
     {
@@ -182,13 +182,13 @@ export const INITIAL_DATA: AppData = {
       date: "2026-11-07",
       monthYear: "2026-11",
       categoryId: "savings",
-      title: "Automatic Deposit to Family Bank Account",
+      title: "Automatic Deposit to Family Savings (PayPal Transfer)",
       amountIdr: 2500000,
-      vendor: "Bank BRI Unit Karangampel",
+      vendor: "PayPal",
       paidBy: "Slamet Widodo",
       receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
-      verificationNotes: "Bank passbook print photo verified by Siti.",
+      verificationNotes: "PayPal transfer confirmation screenshot verified by Siti.",
       verifiedAt: "2026-11-07"
     },
     {
@@ -268,13 +268,13 @@ export const INITIAL_DATA: AppData = {
       date: "2026-10-07",
       monthYear: "2026-10",
       categoryId: "savings",
-      title: "Family Bank Savings Deposit",
+      title: "Family Savings Deposit via PayPal",
       amountIdr: 2500000,
-      vendor: "Bank BRI Unit Karangampel",
+      vendor: "PayPal",
       paidBy: "Slamet Widodo",
       receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
-      verificationNotes: "Bank receipt confirmed.",
+      verificationNotes: "PayPal transfer receipt confirmed.",
       verifiedAt: "2026-10-07"
     },
 
@@ -340,13 +340,13 @@ export const INITIAL_DATA: AppData = {
       date: "2026-09-07",
       monthYear: "2026-09",
       categoryId: "savings",
-      title: "Family Bank Savings Deposit",
+      title: "Family Savings Deposit via PayPal",
       amountIdr: 2500000,
-      vendor: "Bank BRI Unit Karangampel",
+      vendor: "PayPal",
       paidBy: "Slamet Widodo",
       receiptUrl: "/src/assets/images/receipt_sample_material_1794285314395.jpg",
       receiptStatus: "verified",
-      verificationNotes: "Bank print verified.",
+      verificationNotes: "PayPal transfer confirmation verified.",
       verifiedAt: "2026-09-07"
     }
   ],
@@ -361,7 +361,7 @@ export const INITIAL_DATA: AppData = {
       isCompleted: true,
       assignedTo: "Siti Rahayu (HK)",
       estimatedAmountIdr: 15000000,
-      notes: "Transferred via BRI Remittance Causeway Bay immediately after salary payday."
+      notes: "Transferred via PayPal immediately after salary payday."
     },
     {
       id: "evt-nov-02",
@@ -373,7 +373,7 @@ export const INITIAL_DATA: AppData = {
       isCompleted: true,
       assignedTo: "Slamet Widodo",
       estimatedAmountIdr: 1650000,
-      notes: "School bank transfer receipt with stamp obtained."
+      notes: "Official receipt with stamp obtained from school."
     },
     {
       id: "evt-nov-03",
@@ -389,7 +389,7 @@ export const INITIAL_DATA: AppData = {
     },
     {
       id: "evt-nov-04",
-      title: "Deposit Monthly Emergency Fund to Bank BRI",
+      title: "Deposit Monthly Emergency Fund via PayPal",
       date: "2026-11-07",
       time: "11:00",
       type: "savings",
@@ -397,7 +397,7 @@ export const INITIAL_DATA: AppData = {
       isCompleted: true,
       assignedTo: "Slamet Widodo",
       estimatedAmountIdr: 2500000,
-      notes: "Deposited into family account, passbook photo sent to Siti."
+      notes: "Deposited into family savings via PayPal, confirmation screenshot sent to Siti."
     },
     {
       id: "evt-nov-05",
@@ -425,7 +425,7 @@ export const INITIAL_DATA: AppData = {
     },
     {
       id: "evt-nov-07",
-      title: "WhatsApp Video Call: Inspect Porch Tiling Progress",
+      title: "Video Call: Inspect Porch Tiling Progress",
       date: "2026-11-15",
       time: "20:00",
       type: "task",
@@ -480,7 +480,7 @@ export const INITIAL_DATA: AppData = {
       isCompleted: false,
       assignedTo: "Siti Rahayu (HK)",
       estimatedAmountIdr: 15000000,
-      notes: "December salary transfer to Indramayu via Bank BRI HK."
+      notes: "December salary transfer to Indramayu via PayPal."
     }
   ]
 };

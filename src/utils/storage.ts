@@ -3,6 +3,46 @@ import { INITIAL_DATA } from '../data/initialData';
 
 const STORAGE_KEY = 'remitpal_expense_tracker_v1';
 
+/**
+ * Sanity-check the loaded data to catch corrupted / accumulated records.
+ * - Rejects any single remittance with amountIdr > 500,000,000 (Rp 500M is an
+ *   absurd single transfer; legitimate ones are ~15,000,000 IDR each).
+ * - Rejects any single expense with amountIdr > 100,000,000 (Rp 100M).
+ * - Caps the total number of remittances to 120 (10 years of monthly transfers).
+ * Returns null if the data looks fundamentally broken and a reset is needed.
+ */
+export function sanitizeAppData(data: AppData): AppData | null {
+  const MAX_SINGLE_REMITTANCE_IDR = 500_000_000;    // Rp 500M
+  const MAX_SINGLE_EXPENSE_IDR   = 100_000_000;    // Rp 100M
+  const MAX_REMITTANCE_RECORDS   = 120;
+
+  const cleanRemittances = data.remittances
+    .filter((r) => {
+      const amt = Number(r.amountIdr);
+      if (!isFinite(amt) || amt <= 0 || amt > MAX_SINGLE_REMITTANCE_IDR) {
+        console.warn(
+          `[RemitPal] Dropping corrupted remittance "${r.id}" with amountIdr=${r.amountIdr}`
+        );
+        return false;
+      }
+      return true;
+    })
+    .slice(0, MAX_REMITTANCE_RECORDS);
+
+  const cleanExpenses = data.expenses.filter((e) => {
+    const amt = Number(e.amountIdr);
+    if (!isFinite(amt) || amt <= 0 || amt > MAX_SINGLE_EXPENSE_IDR) {
+      console.warn(
+        `[RemitPal] Dropping corrupted expense "${e.id}" with amountIdr=${e.amountIdr}`
+      );
+      return false;
+    }
+    return true;
+  });
+
+  return { ...data, remittances: cleanRemittances, expenses: cleanExpenses };
+}
+
 export function loadAppData(): AppData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -18,7 +58,21 @@ export function loadAppData(): AppData {
     if (!parsed.calendarEvents) {
       parsed.calendarEvents = INITIAL_DATA.calendarEvents;
     }
-    return parsed;
+    const sanitized = sanitizeAppData(parsed);
+    if (!sanitized) {
+      console.warn('[RemitPal] Corrupted app data detected — resetting to initial data.');
+      saveAppData(INITIAL_DATA);
+      return INITIAL_DATA;
+    }
+    // If sanitization removed records, persist the clean version immediately.
+    if (
+      sanitized.remittances.length !== parsed.remittances.length ||
+      sanitized.expenses.length !== parsed.expenses.length
+    ) {
+      console.warn('[RemitPal] Corrupted records were removed from localStorage.');
+      saveAppData(sanitized);
+    }
+    return sanitized;
   } catch (err) {
     console.error('Error loading app data from localStorage, falling back to initial data:', err);
     return INITIAL_DATA;

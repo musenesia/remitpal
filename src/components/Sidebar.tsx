@@ -13,7 +13,8 @@ import {
   User,
   LogOut,
   ArrowLeftRight,
-  Bell
+  Bell,
+  Database
 } from 'lucide-react';
 import { ActiveTab, AppData, UserProfile } from '../types';
 import { Translations } from '../i18n/translations';
@@ -320,6 +321,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {isDark ? 'Dark Mode' : 'Light Mode'}
             </button>
           </div>
+
+          {/* Data Management & Reset */}
+          <button
+            onClick={onOpenDataModal}
+            className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg bg-neutral-100/80 dark:bg-neutral-800/80 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/80 transition-colors"
+          >
+            <div className="flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5" />
+              <span>Data & Backup</span>
+            </div>
+            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Manage ➔</span>
+          </button>
 
           {/* DB Status Indicator */}
           <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between text-[11px] text-neutral-400 dark:text-neutral-500">
