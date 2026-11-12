@@ -70,6 +70,43 @@ The chat bar at the bottom of every screen connects to a Gemini 3.8 Flash agent 
 | `add_expense` | Slamet | Classifies a receipt photo and adds an expense to the ledger |
 | `update_receipt_status` | Siti | Verifies, flags, or requests clarification on a pending receipt |
 
+## What the AI can and cannot do
+
+The AI agent is server-side only — Gemini 3.8 Flash, with an OpenRouter fallback (`nvidia/nemotron-3.5-super-vl:free`, Nvidia) used automatically when Gemini is overloaded, and a labelled rule-based fallback when no AI key is configured. The agent is role-aware: it behaves differently for Siti (remitter) and Slamet (manager), and it is always scoped to the authenticated session's role.
+
+### What it CAN do
+
+**As Siti (remitter role)**
+
+- Structure a remittance plan from natural language — *"send 15M for November: 5M renovation, 3.5M tuition, 4M allowance, 2.5M savings"* — into a structured draft with per-category allocations
+- Present a remittance approval card to Siti in the UI (`request_remittance_approval`)
+- Set or update the monthly budget plan with category allocations (`set_monthly_budget`)
+- Review pending receipts and trigger a status update on them (`update_receipt_status`)
+- Schedule calendar events and reminders (`add_calendar_event`)
+- Read a snapshot of the full family ledger: current budget, recent remittances, recent expenses, pending receipts (`get_current_state`)
+
+**As Slamet (manager role)**
+
+- Read a receipt photo (multimodal) and extract vendor, amount, item description
+- Auto-categorize the expense into one of: renovation, tuition, allowance, savings, miscellaneous
+- Add the expense directly to the ledger with the receipt photo attached (`add_expense`)
+- Assess receipt photo quality and set status to `pending` (looks clear, awaiting Siti) or `needs_clarification` (blurry/unreadable)
+- Schedule calendar tasks and reminders
+
+### Hard boundaries — what it CANNOT do
+
+| Boundary | How it's enforced |
+|---|---|
+| Cannot send money | `request_remittance_approval` is intercepted server-side and surfaced as a UI card — it never executes a PayPal call. The payout only happens when Siti clicks Approve in the browser. |
+| Cannot mark a receipt "verified" | Any verified status passed by the AI is silently downgraded to `pending` in `addExpense()`. Only Siti can set verified via the UI or `update_receipt_status` (remitter-only tool). |
+| Cannot verify receipts as Slamet | `update_receipt_status` is role-gated — if Slamet's session calls it, the tool returns an error and nothing changes. |
+| Cannot set budgets as Slamet | `set_monthly_budget` is similarly role-gated to remitter only. |
+| Cannot delete expenses or remittances | No delete tools exist in the agent's tool set at all. |
+| Cannot access the PayPal API directly | The agent has no PayPal tool. USD conversion is computed server-side (`idrToUsd`) and injected into the approval draft — the model's own `paypalAmount` value is overridden if it doesn't match. |
+| Cannot edit existing expenses | `add_expense` only creates new records; there's no `edit_expense` or `delete_expense` tool. |
+| Cannot modify calendar events | Only `add_calendar_event` exists — no edit or delete. |
+| Cannot act on behalf of the other user | The agent is always scoped to the authenticated session's role. Slamet cannot trigger Siti's tools and vice versa. |
+
 ---
 
 ## Stack
