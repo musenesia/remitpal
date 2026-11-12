@@ -156,7 +156,7 @@ in DEMO MODE with no external dependencies.
 ## Render deploy (for the developer, not the judges)
 
 Blueprint: `render.yaml` (free web service + free PostgreSQL
-database `amanah-db`). From the Render Dashboard → New →
+database `remitpal-db`). From the Render Dashboard → New →
 Blueprint → point to this repo. Set these env vars in the
 Render dashboard (all `sync: false` in `render.yaml`):
 `GEMINI_API_KEY`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`,

@@ -1,14 +1,14 @@
-# Render Blueprint for Amanah Remit — Migrant Worker Expense Tracker
+# Render Blueprint for RemitPal — Migrant Worker Expense Tracker
 # Deploy with: render blueprint deploy (or via Render Dashboard > New > Blueprint)
 
 databases:
-  - name: amanah-db
+  - name: remitpal-db
     plan: free
     ipAllowList: []   # Allow connections from Render services only
 
 services:
   - type: web
-    name: amanah-remit
+    name: remitpal
     env: node
     plan: free
     buildCommand: npm run build
@@ -19,7 +19,7 @@ services:
         value: production
       - key: DATABASE_URL
         fromDatabase:
-          name: amanah-db
+          name: remitpal-db
           property: connectionString
       - key: GEMINI_API_KEY
         sync: false   # Set this manually in the Render dashboard
