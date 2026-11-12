@@ -870,12 +870,20 @@ export async function replaceAllData(data: AppData): Promise<void> {
   }
 }
 
-export async function resetDatabase(): Promise<void> {
+// Reset the ledger to seed data. The caller's own session token is preserved
+// so they are NOT logged out by their own reset — otherwise the next
+// authenticated call (e.g. the AI agent) would 401 and bounce them to login.
+// All other (stale) sessions are cleared.
+export async function resetDatabase(callerToken?: string): Promise<void> {
   await pool.query('DELETE FROM remittances');
   await pool.query('DELETE FROM expenses');
   await pool.query('DELETE FROM budgets');
   await pool.query('DELETE FROM calendar_events');
-  await pool.query('DELETE FROM sessions');
+  if (callerToken) {
+    await pool.query('DELETE FROM sessions WHERE token <> $1', [callerToken]);
+  } else {
+    await pool.query('DELETE FROM sessions');
+  }
   await pool.query('DELETE FROM notifications');
   await seedUsersIfEmpty();
   await seedDataIfEmpty();
