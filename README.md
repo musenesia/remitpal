@@ -20,7 +20,7 @@ Click the **Deploy to Render** button above to host your own copy of RemitPal on
 <img width="1920" height="1080" alt="Screenshot-76" src="https://github.com/user-attachments/assets/cfc841b4-f4f6-46ac-86a4-c07141b3d3e2" />
 
 
-Siti Rahayu works as an elderly-care assistant in Causeway Bay. Every month she sends 15,000,000 IDR home to her husband Slamet Widodo so he can pay for the family's house renovation, the kids' school fees, and household expenses — while she is 3,000 km away and can only check receipts over WhatsApp.
+Siti Rahayu works as an elderly-care assistant in Causeway Bay. Every month she sends 15,000,000 IDR home to her husband Slamet Widodo so he can pay for the family's house renovation, the kids' school fees, and household expenses, while she is 3,000 km away and can only check receipts over WhatsApp.
 
 RemitPal replaces the WhatsApp photos and mental accounting with a shared, verifiable ledger:
 
@@ -57,7 +57,7 @@ The chat bar at the bottom of every screen connects to a Gemini 3.8 Flash agent 
 3. The agent calls `request_remittance_approval` — this surfaces a structured approval card in the chat with the full allocation breakdown and the USD amount derived server-side from the IDR total at Rp 16,000/USD (display rate only, read-only on the card).
 4. **Human-in-the-loop**: Siti reviews the card and clicks **Approve & Send via PayPal**. The PayPal flow is never triggered by the AI alone.
 5. The frontend calls `POST /api/paypal/send` → the server creates a PayPal Payouts v1 batch (USD derived from the approved IDR total) from Siti's own sandbox business account to Slamet's verified email.
-6. The app creates the remittance record (with the PayPal payout batch id as the reference number) ONLY when PayPal reports the payout item SUCCESS. An activity notification + WhatsApp message is sent.
+6. The app creates the remittance record (with the PayPal payout batch id as the reference number) ONLY when PayPal reports the payout item SUCCESS. 
 
 ### Slamet's flow — upload → classify → verify
 
@@ -84,13 +84,13 @@ The chat bar at the bottom of every screen connects to a Gemini 3.8 Flash agent 
 
 ## What the AI can and cannot do
 
-The AI agent is server-side only — Gemini 3.8 Flash, with an OpenRouter fallback (`nvidia/nemotron-3.5-super-vl:free`, Nvidia) used automatically when Gemini is overloaded, and a labelled rule-based fallback when no AI key is configured. The agent is role-aware: it behaves differently for Siti (remitter) and Slamet (manager), and it is always scoped to the authenticated session's role.
+The AI agent is server-side only: Gemini 3.8 Flash, with an OpenRouter fallback (`nvidia/nemotron-3.5-super-vl:free`, Nvidia) used automatically when Gemini is overloaded, and a labelled rule-based fallback when no AI key is configured. The agent is role-aware: it behaves differently for Siti (remitter) and Slamet (manager), and it is always scoped to the authenticated session's role.
 
 ### What it CAN do
 
 **As Siti (remitter role)**
 
-- Structure a remittance plan from natural language — *"send 15M for November: 5M renovation, 3.5M tuition, 4M allowance, 2.5M savings"* — into a structured draft with per-category allocations
+- Structure a remittance plan from natural language: *"send 15M for November: 5M renovation, 3.5M tuition, 4M allowance, 2.5M savings"* into a structured draft with per-category allocations
 - Present a remittance approval card to Siti in the UI (`request_remittance_approval`)
 - Set or update the monthly budget plan with category allocations (`set_monthly_budget`)
 - Review pending receipts and trigger a status update on them (`update_receipt_status`)
@@ -105,18 +105,18 @@ The AI agent is server-side only — Gemini 3.8 Flash, with an OpenRouter fallba
 - Assess receipt photo quality and set status to `pending` (looks clear, awaiting Siti) or `needs_clarification` (blurry/unreadable)
 - Schedule calendar tasks and reminders
 
-### Hard boundaries — what it CANNOT do
+### Hard boundaries (what it CANNOT do)
 
 | Boundary | How it's enforced |
 |---|---|
-| Cannot send money | `request_remittance_approval` is intercepted server-side and surfaced as a UI card — it never executes a PayPal call. The payout only happens when Siti clicks Approve in the browser. |
+| Cannot send money | `request_remittance_approval` is intercepted server-side and surfaced as a UI card, it never executes a PayPal call. The payout only happens when Siti clicks Approve in the browser. |
 | Cannot mark a receipt "verified" | Any verified status passed by the AI is silently downgraded to `pending` in `addExpense()`. Only Siti can set verified via the UI or `update_receipt_status` (remitter-only tool). |
-| Cannot verify receipts as Slamet | `update_receipt_status` is role-gated — if Slamet's session calls it, the tool returns an error and nothing changes. |
+| Cannot verify receipts as Slamet | `update_receipt_status` is role-gated, if Slamet's session calls it, the tool returns an error and nothing changes. |
 | Cannot set budgets as Slamet | `set_monthly_budget` is similarly role-gated to remitter only. |
 | Cannot delete expenses or remittances | No delete tools exist in the agent's tool set at all. |
-| Cannot access the PayPal API directly | The agent has no PayPal tool. USD conversion is computed server-side (`idrToUsd`) and injected into the approval draft — the model's own `paypalAmount` value is overridden if it doesn't match. |
+| Cannot access the PayPal API directly | The agent has no PayPal tool. USD conversion is computed server-side (`idrToUsd`) and injected into the approval draft, the model's own `paypalAmount` value is overridden if it doesn't match. |
 | Cannot edit existing expenses | `add_expense` only creates new records; there's no `edit_expense` or `delete_expense` tool. |
-| Cannot modify calendar events | Only `add_calendar_event` exists — no edit or delete. |
+| Cannot modify calendar events | Only `add_calendar_event` exists, no edit or delete. |
 | Cannot act on behalf of the other user | The agent is always scoped to the authenticated session's role. Slamet cannot trigger Siti's tools and vice versa. |
 
 ---
@@ -127,8 +127,7 @@ The AI agent is server-side only — Gemini 3.8 Flash, with an OpenRouter fallba
 - **Backend**: Express 4, TypeScript (tsx dev / esbuild prod)
 - **Database**: PostgreSQL (Render-managed, `pg` pool)
 - **AI**: Google Gemini 3.8 Flash via `@google/genai` SDK v2 (function calling + multimodal vision)
-- **Payments**: PayPal Payouts v1 (sandbox only — live is never used)
-- **Notifications**: Fonnte WhatsApp gateway (optional)
+- **Payments**: PayPal Payouts v1 (sandbox only, live is never used)
 - **Deploy**: Render (free tier, `render.yaml` blueprint)
 
 ---
@@ -172,8 +171,6 @@ PAYPAL_RECIPIENT_EMAIL="slamet_sandbox@example.com"  # a sandbox personal accoun
 PAYPAL_MOCK="false"   # set "true" for DEMO MODE (mock payout batches, labelled MOCK, no real payment)
 AGENT_MOCK="false"    # set "true" to run a rule-based mock agent (no Gemini key needed)
 
-# Optional: WhatsApp notifications via Fonnte
-FONNTE_TOKEN=""
 ```
 
 ### 3. Run
@@ -184,7 +181,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Default demo accounts (DEMO — seeded automatically; passwords are set via `SEED_SITI_PASSWORD` / `SEED_SLAMET_PASSWORD` and are in the Devpost testing instructions, never in this repo):
+Default demo accounts (DEMO: seeded automatically; passwords are set via `SEED_SITI_PASSWORD` / `SEED_SLAMET_PASSWORD` and are in the Devpost testing instructions, never in this repo):
 
 | Username | Role |
 |----------|------|
@@ -210,22 +207,22 @@ AGENT_MOCK="true"
 ## PayPal Sandbox Setup (Payouts v1)
 
 1. Go to [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/applications/sandbox).
-2. Create a **REST app** on a sandbox **Business** account with **Payouts approved** → copy the **Client ID** and **Secret** into `.env`. (This business account is Siti's own sender account — RemitPal is her personal app, not a multi-user service; she funds it herself and the app holds no one else's money.)
-3. Under **Sandbox Accounts**, create a **Personal** account for Slamet — copy its email into `PAYPAL_RECIPIENT_EMAIL`. Slamet is the receiver; the payout is sent to his email.
+2. Create a **REST app** on a sandbox **Business** account with **Payouts approved** → copy the **Client ID** and **Secret** into `.env`. (This business account is Siti's own sender account, RemitPal is her personal app, not a multi-user service; she funds it herself and the app holds no one else's money.)
+3. Under **Sandbox Accounts**, create a **Personal** account for Slamet, copy its email into `PAYPAL_RECIPIENT_EMAIL`. Slamet is the receiver; the payout is sent to his email.
 4. Set `PAYPAL_ENV=sandbox`. Live PayPal is never used.
 
 ### Why Payouts v1 (and not Personal Payments v2)
 
-For a multi-user remittance service, Personal Payments v2 would be the right method — each sender would pay from their own personal account in PayPal's UI. But that API is limited-release and is **not enabled on this sandbox app**: token creation returns `403 NOT_AUTHORIZED / PERMISSION_DENIED` (debug_id `f13223105b617`), and approval must be requested via p2papiapproval@paypal.com. Payouts v1 **is** approved on the same app, and it is the right method for RemitPal's actual scope: a personal app for one sender (Siti), whose own business account sends the payout only after she approves a plan in-app.
+For a multi-user remittance service, Personal Payments v2 would be the right method, each sender would pay from their own personal account in PayPal's UI. But that API is limited-release and is **not enabled on this sandbox app**: token creation returns `403 NOT_AUTHORIZED / PERMISSION_DENIED` (debug_id `f13223105b617`), and approval must be requested via p2papiapproval@paypal.com. Payouts v1 **is** approved on the same app, and it is the right method for RemitPal's actual scope: a personal app for one sender (Siti), whose own business account sends the payout only after she approves a plan in-app.
 
 ### How the payment flow works
 
-1. Siti approves a remittance in the chat (or the Remittance Tracker). The server derives the USD amount from the approved IDR total at Rp 16,000/USD — e.g. Rp 15,000,000 → **USD 937.50** (display rate only; the client never supplies the USD amount).
+1. Siti approves a remittance in the chat (or the Remittance Tracker). The server derives the USD amount from the approved IDR total at Rp 16,000/USD, e.g. Rp 15,000,000 → **USD 937.50** (display rate only; the client never supplies the USD amount).
 2. `POST /api/paypal/send` creates a single-item Payouts v1 batch for Slamet's sandbox personal account (currency `USD`, recipient by email), sent from Siti's own sandbox business account.
 3. The app creates the ledger record ONLY when PayPal reports the payout item `SUCCESS`. The payout batch id becomes the reference number. Any other outcome creates no record.
 4. **DEMO MODE** (`PAYPAL_MOCK=true`): no PayPal call is made. The batch id is `MOCK-<timestamp>` and the record is created immediately, labelled `MOCK — DEMO MODE, no PayPal payment moved`.
 
-Before filming or judging, check the sandbox business account balance is at least **USD 937.50** — a payout fails if the sender balance is insufficient.
+Before filming or judging, check the sandbox business account balance is at least **USD 937.50** , a payout fails if the sender balance is insufficient.
 
 Never claim a sandbox transfer is a live international remittance.
 
@@ -240,7 +237,7 @@ The `render.yaml` blueprint provisions a free PostgreSQL database and a Node web
 ```
 
 Set environment variables in the Render dashboard (marked `sync: false` in `render.yaml`):
-- `GEMINI_API_KEY` (and/or `OPENROUTER_API_KEY` — the OpenRouter fallback, model `OPENROUTER_MODEL`, defaults to `nvidia/nemotron-3.5-super-vl:free`)
+- `GEMINI_API_KEY` (and/or `OPENROUTER_API_KEY`, the OpenRouter fallback, model `OPENROUTER_MODEL`, defaults to `nvidia/nemotron-3.5-super-vl:free`)
 - `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_RECIPIENT_EMAIL`
 
 ---
@@ -281,4 +278,4 @@ remitpal/
 
 ## License
 
-[MIT](./LICENSE) — built for the PayPal Hackathon 2026.
+[MIT](./LICENSE) built for the PayPal Hackathon 2026.
