@@ -314,9 +314,9 @@ export interface ServiceStatus {
 
 /**
  * Fetch the real-vs-mock configuration of the Gemini agent and PayPal
- * Personal Payments. Used to render LIVE / MOCK badges so it's obvious
- * the app uses real services. Never exposes secrets — only booleans,
- * the model name, and the PayPal env.
+ * Payouts. Used to render LIVE / MOCK badges so it's obvious the app
+ * uses real services. Never exposes secrets — only booleans, the model
+ * name, and the PayPal env.
  */
 export async function fetchServiceStatus(): Promise<ServiceStatus | null> {
   try {
@@ -330,176 +330,76 @@ export async function fetchServiceStatus(): Promise<ServiceStatus | null> {
 }
 
 // -------------------------------------------------------------
-// PayPal Personal Payments v2 Client (sandbox only, Siti -> Slamet)
 // -------------------------------------------------------------
-// Flow: create token (server derives USD from the approved IDR total) ->
-// store the pending transfer in sessionStorage -> redirect Siti to
-// PayPal's UI -> PayPal returns with ?status=...&transactionId=... ->
-// look the token up -> a ledger record is created ONLY when the token
-// lookup says COMPLETED (or SUCCESS) AND a transactionId is present.
+// PayPal Payouts v1 Client (sandbox only, Siti -> Slamet)
+// -------------------------------------------------------------
+// Flow: Siti approves a plan in-app -> POST /api/paypal/send (server
+// derives USD from the approved IDR total) -> PayPal creates a
+// single-item payout batch from Siti's own business account to
+// Slamet's verified email -> a ledger record is created ONLY when
+// PayPal reports the payout item SUCCESS, with the real payout batch
+// id as the reference number. In mock mode (DEMO MODE) the record is
+// created immediately and labelled MOCK — no PayPal payment moves.
 
-export interface PersonalPaymentTokenResult {
-  tokenId: string;
-  status: string;
-  initiatePaymentUrl: string | null;
-  amount: string;
-  currency: string;
-  receiverEmail: string;
-  mock: boolean;
-}
-
-export interface PersonalPaymentTokenStatus {
-  status: string | null;
-  transactionId: string | null;
-  amount: string | number | null;
-  currency: string | null;
-  tokenId?: string;
-  mock?: boolean;
-}
-
-export interface CreatePersonalPaymentTokenResult {
+export interface PayPalPayoutResponse {
   success: boolean;
-  token?: PersonalPaymentTokenResult;
+  payout?: {
+    payoutBatchId: string;
+    batchStatus: string;
+    transactionStatus?: string;
+    amount?: { value: string; currency: string };
+    mock: boolean;
+  };
+  error?: string;
+}
+
+export interface PayPalStatusResponse {
+  success: boolean;
+  batchStatus?: string;
+  transactionStatus?: string;
   error?: string;
 }
 
 /**
- * Create a Personal Payments v2 token on the server. The USD amount is
- * derived server-side from amountIdr at Rp 16,000/USD — the client never
- * supplies the amount PayPal sees. The caller must store the pending
- * transfer (savePendingPersonalPayment) BEFORE redirecting the user to
- * initiatePaymentUrl — PayPal's return carries no token id.
- * In mock mode the token is a MOCK token with no URL: do NOT redirect.
+ * Trigger a PayPal payout to Slamet.
+ * The USD amount is derived server-side from amountIdr at Rp 16,000/USD —
+ * the client sends amountIdr (and the derived USD as a cross-check) and
+ * never supplies the amount PayPal sees on its own. The remittance ledger
+ * record is built client-side from the returned payout result and persisted
+ * via the normal remittance flow. Requires the logged-in remitter's token
+ * (from local storage).
  */
-export async function createPersonalPaymentToken(params: {
+export async function sendPayPalPayout(params: {
   amountIdr: number;
-  externalReferenceId: string;
+  amountUsd?: string;
   note?: string;
-  returnUrl: string;
-}): Promise<CreatePersonalPaymentTokenResult> {
+}): Promise<PayPalPayoutResponse> {
   try {
-    const res = await apiFetch('/api/paypal/personal-payments/tokens', {
+    const res = await apiFetch('/api/paypal/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
     const data = await safeJson(res);
-    if (!res.ok) return { success: false, error: data.error || 'PayPal token creation failed.' };
-    return { success: true, token: data.token as PersonalPaymentTokenResult };
+    if (!res.ok) return { success: false, error: data.error || 'PayPal payout failed.' };
+    return data as PayPalPayoutResponse;
   } catch (err: any) {
-    return { success: false, error: err.message || 'Network error creating PayPal token.' };
+    return { success: false, error: err.message || 'Network error during PayPal payout.' };
   }
 }
 
-export interface GetPersonalPaymentTokenResult {
-  success: boolean;
-  status?: PersonalPaymentTokenStatus;
-  error?: string;
-}
-
-/** Look up a Personal Payments token after the PayPal return. Never invents a transaction id. */
-export async function getPersonalPaymentToken(tokenId: string): Promise<GetPersonalPaymentTokenResult> {
+/** Refresh the status of a payout that may still have been PENDING/PROCESSING. */
+export async function checkPayPalPayoutStatus(payoutBatchId: string): Promise<PayPalStatusResponse> {
   try {
-    const res = await apiFetch(`/api/paypal/personal-payments/tokens/${encodeURIComponent(tokenId)}`);
+    const res = await apiFetch(`/api/paypal/status/${encodeURIComponent(payoutBatchId)}`);
     const data = await safeJson(res);
-    if (!res.ok) return { success: false, error: data.error || 'Token lookup failed.' };
-    return {
-      success: true,
-      status: {
-        status: data.status ?? null,
-        transactionId: data.transactionId ?? null,
-        amount: data.amount ?? null,
-        currency: data.currency ?? null,
-        tokenId: data.tokenId ?? tokenId,
-        mock: data.mock ?? false,
-      },
-    };
+    if (!res.ok) return { success: false, error: data.error || 'Status check failed.' };
+    return data as PayPalStatusResponse;
   } catch (err: any) {
-    return { success: false, error: err.message || 'Network error looking up PayPal token.' };
+    return { success: false, error: err.message || 'Network error during status check.' };
   }
 }
 
-export interface RecordManualPersonalPaymentResult {
-  success: boolean;
-  referenceNo?: string;
-  mock?: boolean;
-  error?: string;
-}
-
-/**
- * DEMO MODE manual record (mock only). Returns a MOCK reference number;
- * it does NOT create a remittance record — the caller builds the record
- * and labels it MOCK. Fails unless the server runs with PAYPAL_MOCK=true.
- */
-export async function recordManualPersonalPayment(params: {
-  amountIdr: number;
-  monthYear: string;
-  allocations: Record<string, number>;
-  note?: string;
-}): Promise<RecordManualPersonalPaymentResult> {
-  try {
-    const res = await apiFetch('/api/paypal/personal-payments/manual-record', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-    const data = await safeJson(res);
-    if (!res.ok) return { success: false, error: data.error || 'Manual record failed.' };
-    return { success: true, referenceNo: data.referenceNo, mock: data.mock };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Network error recording manual payment.' };
-  }
-}
-
-// -------------------------------------------------------------
-// Pending Personal Payment (sessionStorage)
-// -------------------------------------------------------------
-// PayPal's return carries only status + transactionId, NOT the token id,
-// so the pending transfer must be stored BEFORE redirecting to PayPal.
-
-export interface PendingPersonalPayment {
-  tokenId: string;
-  amountIdr: number;
-  monthYear: string;
-  allocations: Record<string, number>;
-  note: string;
-  amountUsd: string;
-  currency: 'USD';
-  source: 'chat' | 'tracker';
-}
-
-const PENDING_PERSONAL_PAYMENT_KEY = 'remitpal_pending_personal_payment';
-
-export function savePendingPersonalPayment(pending: PendingPersonalPayment): void {
-  try {
-    sessionStorage.setItem(PENDING_PERSONAL_PAYMENT_KEY, JSON.stringify(pending));
-  } catch {
-    // sessionStorage unavailable: the redirect still proceeds, but the
-    // return check will report no pending payment and create no record.
-  }
-}
-
-export function loadPendingPersonalPayment(): PendingPersonalPayment | null {
-  try {
-    const raw = sessionStorage.getItem(PENDING_PERSONAL_PAYMENT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.tokenId || !parsed.amountIdr) return null;
-    return parsed as PendingPersonalPayment;
-  } catch {
-    return null;
-  }
-}
-
-export function clearPendingPersonalPayment(): void {
-  try {
-    sessionStorage.removeItem(PENDING_PERSONAL_PAYMENT_KEY);
-  } catch {
-    // ignore
-  }
-}
-
-// -------------------------------------------------------------
 // RemitPal AI Agent Client
 // -------------------------------------------------------------
 

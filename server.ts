@@ -29,7 +29,7 @@ import {
 } from './server/db.ts';
 import type { UserProfile } from './src/types';
 import { broadcastEventNotification } from './server/whatsapp.ts';
-import { createPersonalPaymentToken, getPersonalPaymentToken, isPayPalConfigured, payPalConfigError, idrToUsd, PayPalError } from './server/paypal.ts';
+import { sendPayout, getPayoutStatus, isPayPalConfigured, payPalConfigError, idrToUsd, PayPalError } from './server/paypal.ts';
 import { runAgent, isAgentEnabled } from './server/agent.ts';
 import type { AgentRequest } from './server/agent.ts';
 
@@ -344,50 +344,42 @@ app.delete('/api/remittances/:id', requireAuth, requireRole('remitter'), async (
 });
 
 // -------------------------------------------------------------
-// PayPal Personal Payments v2 Endpoints (sandbox only, Siti -> Slamet)
 // -------------------------------------------------------------
-// Flow: POST /tokens (server derives USD from the approved IDR total at
-// Rp 16,000/USD) -> frontend redirects Siti to PayPal's UI -> PayPal
-// returns her with ?status=...&transactionId=... -> frontend looks the
-// token up via GET /tokens/:id -> a ledger record is created ONLY when
-// the token lookup says COMPLETED (or SUCCESS) AND a transactionId is
-// present. No record is ever created before the return is verified.
-
-function isHttpUrl(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
+// PayPal Payouts v1 Endpoints (sandbox only, Siti -> Slamet)
+// -------------------------------------------------------------
+// RemitPal is Siti's PERSONAL app: the payout sender is Siti's own
+// sandbox business account (the account that owns the REST app
+// credentials). Flow: POST /api/paypal/send (server derives USD from
+// the approved IDR total at Rp 16,000/USD) -> PayPal creates a
+// single-item payout batch to Slamet's verified email -> the ledger
+// record is created ONLY when PayPal reports the payout item SUCCESS.
+// No record is ever created before PayPal confirms. Without
+// credentials (and not in mock mode) -> 503 MISSING_CREDENTIALS,
+// never a fake payout.
 
 /**
- * Create a Personal Payments token for Siti to approve in PayPal's UI.
+ * Send a real PayPal payout to Slamet.
+ *
  * Remitter-only. Body: {amountIdr (required, positive integer),
- * externalReferenceId (required, 1-127 chars), note?, returnUrl (required)}.
- * The USD amount is derived server-side from amountIdr at Rp 16,000/USD;
- * any client-supplied USD amount that differs by more than $0.01 is rejected.
- * Receiver is always PAYPAL_RECIPIENT_EMAIL (Slamet's sandbox personal
- * account). Without credentials (and not in mock mode) -> 503
- * MISSING_CREDENTIALS, never a fake token.
+ * amountUsd? (optional cross-check — must equal amountIdr / 16000
+ * within $0.01), note?}. The USD amount is derived server-side from
+ * amountIdr at Rp 16,000/USD; currency is always USD. Receiver is
+ * always PAYPAL_RECIPIENT_EMAIL (Slamet's sandbox personal account).
+ * This endpoint is intentionally payout-only: it returns the PayPal
+ * batch id and status so the frontend can build a RemittanceRecord
+ * and persist it through the normal /api/remittances flow (which also
+ * fires the single notification + WhatsApp broadcast). Keeping the
+ * payout separate avoids double notifications.
  */
-app.post('/api/paypal/personal-payments/tokens', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
+app.post('/api/paypal/send', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
   try {
-    const { amountIdr, externalReferenceId, note, returnUrl, amount, amountUsd } = req.body || {};
+    const { amountIdr, note, amount, amountUsd } = req.body || {};
 
     if (!Number.isInteger(amountIdr) || amountIdr <= 0) {
       return res.status(400).json({ error: 'amountIdr is required and must be a positive integer (IDR).' });
     }
-    if (typeof externalReferenceId !== 'string' || externalReferenceId.length < 1 || externalReferenceId.length > 127) {
-      return res.status(400).json({ error: 'externalReferenceId is required, 1-127 characters.' });
-    }
     if (note !== undefined && note !== null && (typeof note !== 'string' || note.length > 255)) {
       return res.status(400).json({ error: 'note, when given, must be a string of at most 255 characters.' });
-    }
-    if (!isHttpUrl(returnUrl)) {
-      return res.status(400).json({ error: 'returnUrl is required and must be an http(s) URL.' });
     }
 
     // USD is always derived server-side from the approved IDR total.
@@ -400,92 +392,62 @@ app.post('/api/paypal/personal-payments/tokens', requireAuth, requireRole('remit
       }
     }
 
-    const receiverEmail = process.env.PAYPAL_RECIPIENT_EMAIL;
-    if (!receiverEmail && process.env.PAYPAL_MOCK !== 'true') {
-      return res.status(503).json({ error: 'PayPal is not configured: PayPal recipient not set (PAYPAL_RECIPIENT_EMAIL).', code: 'MISSING_CREDENTIALS' });
-    }
     if (!isPayPalConfigured()) {
       const cfgErr = payPalConfigError();
       return res.status(503).json({ error: `PayPal is not configured: ${cfgErr}`, code: 'MISSING_CREDENTIALS' });
     }
 
-    const tokenResult = await createPersonalPaymentToken({
-      receiverEmail: receiverEmail || 'mock-recipient@example.com',
+    const payout = await sendPayout({
       amount: amountUsdDerived,
       currency: 'USD',
-      noteToReceiver: note,
-      externalReferenceId,
-      returnUrl,
+      note: note || 'Family remittance from Siti via RemitPal',
+      senderItemId: `remitpal_${Date.now()}`,
     });
 
-    res.json({ success: true, token: tokenResult });
+    res.json({
+      success: true,
+      payout: {
+        payoutBatchId: payout.payoutBatchId,
+        batchStatus: payout.batchStatus,
+        transactionStatus: payout.items[0]?.transactionStatus,
+        amount: { value: amountUsdDerived, currency: 'USD' },
+        mock: payout.mock,
+      },
+    });
   } catch (err: any) {
-    console.error('[PayPal Token Error]:', err);
+    console.error('[PayPal Send Error]:', err);
     if (err instanceof PayPalError) {
       return res.status(err.status).json({ error: err.message, code: err.code });
     }
-    res.status(500).json({ error: err.message || 'PayPal token creation failed.' });
+    res.status(500).json({ error: err.message || 'PayPal payout failed.' });
   }
 });
 
 /**
- * Look up a Personal Payments token after the PayPal return.
- * Any authenticated role. Validates the token id format; never invents a
- * transaction id — the response carries PayPal's id, or null.
+ * Check the status of a previously-created PayPal payout batch.
+ * Lets the UI refresh a payout that was created in PENDING/PROCESSING state.
  */
-app.get('/api/paypal/personal-payments/tokens/:tokenId', requireAuth, async (req: Request, res: Response) => {
+app.get('/api/paypal/status/:batchId', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { tokenId } = req.params;
-    if (!tokenId || !/^[A-Za-z0-9_-]+$/.test(tokenId)) {
-      return res.status(400).json({ error: 'Token id in the URL is missing or malformed.' });
+    const { batchId } = req.params;
+    if (!batchId || !/^[A-Za-z0-9_-]+$/.test(batchId)) {
+      return res.status(400).json({ error: 'Batch id in the URL is missing or malformed.' });
     }
-    if (!isPayPalConfigured()) {
-      const cfgErr = payPalConfigError();
-      return res.status(503).json({ error: `PayPal is not configured: ${cfgErr}`, code: 'MISSING_CREDENTIALS' });
-    }
-    const status = await getPersonalPaymentToken(tokenId);
-    res.json({ success: true, ...status });
+    const status = await getPayoutStatus(batchId);
+    res.json({
+      success: true,
+      batchStatus: status.batchStatus,
+      transactionStatus: status.items[0]?.transactionStatus,
+    });
   } catch (err: any) {
-    console.error('[PayPal Token Lookup Error]:', err);
+    console.error('[PayPal Status Error]:', err);
     if (err instanceof PayPalError) {
       return res.status(err.status).json({ error: err.message, code: err.code });
     }
-    res.status(500).json({ error: err.message || 'PayPal token lookup failed.' });
+    res.status(500).json({ error: err.message || 'PayPal status check failed.' });
   }
 });
 
-/**
- * DEMO MODE manual record (mock only). Remitter-only. Returns a MOCK
- * reference number; it does NOT create a remittance record itself — the
- * frontend builds the record and labels it MOCK. Returns 400 unless
- * PAYPAL_MOCK === 'true'.
- */
-app.post('/api/paypal/personal-payments/manual-record', requireAuth, requireRole('remitter'), async (req: Request, res: Response) => {
-  try {
-    if (process.env.PAYPAL_MOCK !== 'true') {
-      return res.status(400).json({ error: 'Manual record is only available in DEMO MODE (PAYPAL_MOCK=true).' });
-    }
-    const { amountIdr, monthYear, allocations, note } = req.body || {};
-    if (!Number.isInteger(amountIdr) || amountIdr <= 0) {
-      return res.status(400).json({ error: 'amountIdr is required and must be a positive integer (IDR).' });
-    }
-    if (typeof monthYear !== 'string' || !/^\d{4}-\d{2}$/.test(monthYear)) {
-      return res.status(400).json({ error: 'monthYear is required (YYYY-MM).' });
-    }
-    if (allocations !== undefined && (typeof allocations !== 'object' || allocations === null || Array.isArray(allocations))) {
-      return res.status(400).json({ error: 'allocations, when given, must be an object of category -> IDR amount.' });
-    }
-    if (note !== undefined && note !== null && (typeof note !== 'string' || note.length > 255)) {
-      return res.status(400).json({ error: 'note, when given, must be a string of at most 255 characters.' });
-    }
-    res.json({ success: true, mock: true, referenceNo: `MOCK-${Date.now()}` });
-  } catch (err: any) {
-    console.error('[PayPal Manual Record Error]:', err);
-    res.status(500).json({ error: err.message || 'Manual record failed.' });
-  }
-});
-
-// -------------------------------------------------------------
 // RemitPal AI Agent Endpoint
 // -------------------------------------------------------------
 

@@ -1,15 +1,23 @@
-// PayPal Personal Payments v2 integration — SANDBOX ONLY.
+// PayPal Payouts v1 integration — SANDBOX ONLY.
 //
-// Siti (the sender) approves a remittance in the UI; the server creates a
-// Personal Payments token, the frontend redirects Siti to PayPal's UI
-// (initiate_payment link + return_url), PayPal returns her to the app with
-// only `status` + `transactionId`, and the app looks the token up before
-// creating any ledger record. Money never moves server-side, and no record
-// is created until the token lookup says COMPLETED.
+// RemitPal is Siti's PERSONAL app, not a multi-user service. The payout
+// sender is Siti's own PayPal business account (the account that owns
+// PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET): she funds it herself, the app
+// holds no one else's money, and a payout is created only after she
+// approves a plan in the app. The server creates a single-item payout
+// batch to Slamet's verified PayPal email and reports PayPal's real
+// batch/item status back; a ledger record is created ONLY when PayPal
+// says the payout item is SUCCESS.
 //
-// Docs: https://developer.paypal.com/docs/api/personal-payments/v2/
-//   - Create token: POST /v2/personal-payments/tokens
-//   - Get token:    GET  /v2/personal-payments/tokens/{token_id}
+// For a multi-user version, Personal Payments v2 would be the right
+// method so each sender pays from their own personal account — but that
+// API is limited-release and is NOT enabled on this sandbox app (token
+// creation returns 403 NOT_AUTHORIZED, debug_id f13223105b617), so this
+// submission uses Payouts v1, which is approved on the same app.
+//
+// Docs: https://developer.paypal.com/api/payments.payouts-batch/v1/
+//   - Create batch: POST /v1/payments/payouts
+//   - Batch status:  GET  /v1/payments/payouts/{payout_batch_id}
 // Auth: OAuth 2.0 client-credentials grant (Basic auth with client_id:secret).
 //
 // LIVE IS NEVER USED: the base URL is always the sandbox host. If
@@ -17,13 +25,17 @@
 // this app must never move real money.
 //
 // Configuration (see .env.example):
-//   PAYPAL_CLIENT_ID         — required for real sandbox tokens
-//   PAYPAL_CLIENT_SECRET     — required for real sandbox tokens
+//   PAYPAL_CLIENT_ID         — required for real sandbox payouts
+//   PAYPAL_CLIENT_SECRET     — required for real sandbox payouts
 //   PAYPAL_ENV               — "sandbox" only; "live" is ignored (see above)
 //   PAYPAL_RECIPIENT_EMAIL   — Slamet's sandbox personal account email
-//   PAYPAL_MOCK              — "true" for DEMO MODE: tokens are fake
-//                              (MOCK-<timestamp>, no PayPal URL), never a
-//                              real payment, and records are labelled MOCK.
+//   PAYPAL_SENDER_EMAIL      — optional; Siti's business account email,
+//                              for reference only (the sender is implicit
+//                              in the OAuth token — whoever owns the
+//                              client id — and is NOT sent in the API call)
+//   PAYPAL_MOCK              — "true" for DEMO MODE: payouts are fake
+//                              (MOCK-<timestamp>), never a real payment,
+//                              and records are labelled MOCK.
 //
 // Display FX rate for the whole project: Rp 16,000/USD, display-only.
 // The USD amount is always derived server-side from the approved IDR total
@@ -43,6 +55,7 @@ interface PaypalConfig {
   clientId?: string;
   clientSecret?: string;
   recipientEmail?: string;
+  senderEmail?: string;
   mock: boolean;
 }
 
@@ -60,6 +73,7 @@ function getConfig(): PaypalConfig {
     clientId: process.env.PAYPAL_CLIENT_ID,
     clientSecret: process.env.PAYPAL_CLIENT_SECRET,
     recipientEmail: process.env.PAYPAL_RECIPIENT_EMAIL,
+    senderEmail: process.env.PAYPAL_SENDER_EMAIL,
     mock: process.env.PAYPAL_MOCK === 'true',
   };
 }
@@ -76,39 +90,19 @@ export class PayPalError extends Error {
   }
 }
 
-/** Whether the app can attempt a Personal Payments token (real credentials OR mock mode). */
+/** Whether the app can attempt a payout (real credentials OR mock mode). */
 export function isPayPalConfigured(): boolean {
   const cfg = getConfig();
   return cfg.mock || (!!cfg.clientId && !!cfg.clientSecret && !!cfg.recipientEmail);
 }
 
-/** Human-readable reason when Personal Payments tokens are unavailable. */
+/** Human-readable reason when payouts are unavailable. */
 export function payPalConfigError(): string | null {
   const cfg = getConfig();
   if (cfg.mock) return null;
   if (!cfg.clientId || !cfg.clientSecret) return 'PayPal credentials not set (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET).';
   if (!cfg.recipientEmail) return 'PayPal recipient not set (PAYPAL_RECIPIENT_EMAIL).';
   return null;
-}
-
-function isValidEmail(value: unknown): value is string {
-  return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function isPositiveDecimalString(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  if (!/^\d+(\.\d{1,2})?$/.test(value)) return false;
-  return Number(value) > 0;
-}
-
-function isHttpUrl(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -148,156 +142,150 @@ async function getAccessToken(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Personal Payments v2 tokens
+// Payouts
 // ---------------------------------------------------------------------------
 
-export interface CreatePersonalPaymentTokenParams {
-  receiverEmail: string;
-  /** USD amount as a decimal string with at most 2dp, e.g. "937.50". Always derived server-side via idrToUsd. */
-  amount: string;
+export interface PayoutItemResult {
+  payoutItemId?: string;
+  transactionStatus?: string; // SUCCESS | PENDING | UNCLAIMED | FAILED | RETURNED | BLOCKED
+  receiver?: string;
+  amount?: { value: string; currency: string };
+}
+
+export interface PayoutResult {
+  payoutBatchId: string;
+  batchStatus: string; // PENDING | PROCESSING | SUCCESS | DENIED
+  items: PayoutItemResult[];
+  mock: boolean;
+}
+
+export interface SendPayoutParams {
+  amount: string; // e.g. "937.50" — always derived server-side via idrToUsd
   currency: string; // must be 'USD'
-  noteToReceiver?: string;
-  externalReferenceId: string; // 1-127 chars
-  returnUrl: string; // http(s) URL the PayPal UI returns to
-}
-
-export interface PersonalPaymentTokenResult {
-  tokenId: string;
-  status: string;
-  /** PayPal approval URL (with return_url appended), or null in mock mode. */
-  initiatePaymentUrl: string | null;
-  amount: string;
-  currency: string;
-  receiverEmail: string;
-  mock: boolean;
-}
-
-export interface PersonalPaymentTokenStatus {
-  status: string;
-  /** PayPal's token id, or null — a transaction id is never invented. */
-  transactionId: string | null;
-  amount: string | null;
-  currency: string | null;
-  tokenId: string;
-  mock: boolean;
+  note?: string;
+  senderItemId?: string; // idempotency hint for the single item
 }
 
 /**
- * Create a Personal Payments v2 token for Siti to approve in PayPal's UI.
- * Validates every field; without credentials throws a 503 MISSING_CREDENTIALS
- * error — never a fake token. In mock mode returns a MOCK token with no URL.
+ * Create a single-item payout batch to the configured recipient (Slamet),
+ * sent from Siti's own business account (the API caller account).
+ * After creating the batch, fetches its status once so we can report the
+ * final (or near-final) state back to the caller.
+ *
+ * Without credentials (and not in mock mode) throws a 503
+ * MISSING_CREDENTIALS error — never a fake payout. In mock mode returns a
+ * MOCK batch with no PayPal call; the caller must label it MOCK.
  */
-export async function createPersonalPaymentToken(
-  params: CreatePersonalPaymentTokenParams
-): Promise<PersonalPaymentTokenResult> {
+export async function sendPayout(params: SendPayoutParams): Promise<PayoutResult> {
   const cfg = getConfig();
 
-  if (!isValidEmail(params.receiverEmail)) {
-    throw new PayPalError(400, 'VALIDATION_ERROR', 'receiverEmail is required and must be a valid email address.');
+  if (params.currency !== 'USD') {
+    throw new PayPalError(400, 'VALIDATION_ERROR', 'currency is required and must be "USD".');
   }
-  if (!isPositiveDecimalString(params.amount)) {
+  if (!/^\d+(\.\d{1,2})?$/.test(params.amount) || Number(params.amount) <= 0) {
     throw new PayPalError(
       400,
       'VALIDATION_ERROR',
       'amount is required and must be a string decimal > 0 with at most 2 decimal places, e.g. "937.50".'
     );
   }
-  if (params.currency !== 'USD') {
-    throw new PayPalError(400, 'VALIDATION_ERROR', 'currency is required and must be "USD".');
-  }
-  if (
-    params.noteToReceiver !== undefined &&
-    params.noteToReceiver !== null &&
-    (typeof params.noteToReceiver !== 'string' || params.noteToReceiver.length > 255)
-  ) {
-    throw new PayPalError(400, 'VALIDATION_ERROR', 'noteToReceiver, when given, must be a string of at most 255 characters.');
-  }
-  if (
-    typeof params.externalReferenceId !== 'string' ||
-    params.externalReferenceId.length < 1 ||
-    params.externalReferenceId.length > 127
-  ) {
-    throw new PayPalError(400, 'VALIDATION_ERROR', 'externalReferenceId is required, 1-127 characters.');
-  }
-  if (!isHttpUrl(params.returnUrl)) {
-    throw new PayPalError(400, 'VALIDATION_ERROR', 'returnUrl is required and must be an http(s) URL.');
-  }
 
-  // DEMO MODE: no credentials, no PayPal call, no fake URL, no fake transaction id.
+  // DEMO MODE: no credentials, no PayPal call, no fake payment.
   if (cfg.mock) {
+    const id = `MOCK-${Date.now()}`;
     return {
-      tokenId: `MOCK-${Date.now()}`,
-      status: 'CREATED',
-      initiatePaymentUrl: null,
-      amount: params.amount,
-      currency: params.currency,
-      receiverEmail: params.receiverEmail,
+      payoutBatchId: id,
+      batchStatus: 'SUCCESS',
+      items: [
+        {
+          payoutItemId: `${id}-ITEM`,
+          transactionStatus: 'SUCCESS',
+          receiver: cfg.recipientEmail || 'mock-recipient@example.com',
+          amount: { value: params.amount, currency: params.currency },
+        },
+      ],
       mock: true,
     };
   }
 
-  const cfgErr = payPalConfigError();
-  if (cfgErr) {
-    throw new PayPalError(503, 'MISSING_CREDENTIALS', `PayPal is not configured: ${cfgErr} No fake token was created.`);
+  const err = payPalConfigError();
+  if (err) {
+    throw new PayPalError(503, 'MISSING_CREDENTIALS', `PayPal is not configured: ${err} No fake payout was created.`);
   }
 
   const token = await getAccessToken();
-  const payload: Record<string, unknown> = {
-    receiver: { id: params.receiverEmail, type: 'EMAIL' },
-    amount: { currency_code: params.currency, value: params.amount },
-    payment_type: 'PERSONAL',
-    intent: 'CAPTURE',
-    external_reference_id: params.externalReferenceId,
-  };
-  if (typeof params.noteToReceiver === 'string' && params.noteToReceiver.trim() !== '') {
-    payload.note_to_receiver = params.noteToReceiver;
-  }
+  const senderBatchId = `remitpal_${Date.now()}`;
+  const senderItemId = params.senderItemId || `item_${Date.now()}`;
 
-  const res = await fetch(`${cfg.baseUrl}/v2/personal-payments/tokens`, {
+  const body = {
+    sender_batch_header: {
+      sender_batch_id: senderBatchId,
+      email_subject: 'You received a remittance from RemitPal',
+      email_message: 'Siti sent you a family remittance via PayPal.',
+      recipient_type: 'EMAIL',
+    },
+    items: [
+      {
+        recipient_type: 'EMAIL',
+        amount: {
+          value: params.amount,
+          currency: params.currency,
+        },
+        receiver: cfg.recipientEmail,
+        note: params.note || 'Family remittance from Siti via RemitPal',
+        sender_item_id: senderItemId,
+      },
+    ],
+  };
+
+  const res = await fetch(`${cfg.baseUrl}/v1/payments/payouts`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      'PayPal-Request-Id': senderBatchId, // idempotency for the batch
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new PayPalError(res.status, 'PAYPAL_ERROR', `PayPal token creation failed (${res.status}): ${text}`);
+    throw new PayPalError(res.status, 'PAYPAL_ERROR', `PayPal payout failed (${res.status}): ${text}`);
   }
 
   const data = (await res.json()) as any;
-  const link = Array.isArray(data.links) ? data.links.find((l: any) => l.rel === 'initiate_payment') : null;
-  if (!data.id || !link || !link.href) {
-    throw new PayPalError(502, 'PAYPAL_ERROR', 'PayPal token response had no id or initiate_payment link.');
+  const batchId: string = data.batch_header?.payout_batch_id;
+  let items: PayoutItemResult[] = [];
+
+  if (Array.isArray(data.items) && data.items.length > 0) {
+    items = data.items.map((it: any) => ({
+      payoutItemId: it.payout_item_id,
+      transactionStatus: it.transaction_status,
+      receiver: it.payout_item?.receiver,
+      amount: it.amount,
+    }));
   }
 
-  const separator = link.href.includes('?') ? '&' : '?';
-  const initiatePaymentUrl = `${link.href}${separator}return_url=${encodeURIComponent(params.returnUrl)}`;
+  // If the create response didn't include processed items, fetch the batch.
+  if (items.length === 0 && batchId) {
+    const status = await getPayoutStatus(batchId);
+    items = status.items;
+  }
 
   return {
-    tokenId: data.id,
-    status: data.status,
-    initiatePaymentUrl,
-    amount: params.amount,
-    currency: params.currency,
-    receiverEmail: params.receiverEmail,
+    payoutBatchId: batchId,
+    batchStatus: data.batch_header?.batch_status || 'PENDING',
+    items,
     mock: false,
   };
 }
 
-/**
- * Look up a Personal Payments token after the PayPal return.
- * Mock mode reports COMPLETED for the mock token id (DEMO MODE only).
- * Real mode returns PayPal's status verbatim; the transaction id is
- * PayPal's id, or null — never invented.
- */
-export async function getPersonalPaymentToken(tokenId: string): Promise<PersonalPaymentTokenStatus> {
+/** Fetch the current status of a payout batch (and its items). */
+export async function getPayoutStatus(payoutBatchId: string): Promise<{ batchStatus: string; items: PayoutItemResult[] }> {
   const cfg = getConfig();
 
   if (cfg.mock) {
-    return { status: 'COMPLETED', transactionId: tokenId, amount: null, currency: null, tokenId, mock: true };
+    return { batchStatus: 'SUCCESS', items: [{ transactionStatus: 'SUCCESS' }] };
   }
 
   const cfgErr = payPalConfigError();
@@ -306,22 +294,25 @@ export async function getPersonalPaymentToken(tokenId: string): Promise<Personal
   }
 
   const token = await getAccessToken();
-  const res = await fetch(`${cfg.baseUrl}/v2/personal-payments/tokens/${encodeURIComponent(tokenId)}`, {
+  const res = await fetch(`${cfg.baseUrl}/v1/payments/payouts/${encodeURIComponent(payoutBatchId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new PayPalError(res.status, 'PAYPAL_ERROR', `PayPal token lookup failed (${res.status}): ${text}`);
+    throw new PayPalError(res.status, 'PAYPAL_ERROR', `PayPal status check failed (${res.status}): ${text}`);
   }
 
   const data = (await res.json()) as any;
+  const items: PayoutItemResult[] = (data.items || []).map((it: any) => ({
+    payoutItemId: it.payout_item_id,
+    transactionStatus: it.transaction_status,
+    receiver: it.payout_item?.receiver,
+    amount: it.amount,
+  }));
+
   return {
-    status: data.status,
-    transactionId: data.id ?? null,
-    amount: data.amount?.value ?? null,
-    currency: data.amount?.currency_code ?? null,
-    tokenId,
-    mock: false,
+    batchStatus: data.batch_header?.batch_status || 'UNKNOWN',
+    items,
   };
 }

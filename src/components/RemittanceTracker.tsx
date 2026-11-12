@@ -15,7 +15,7 @@ import {
 import { AppData, RemittanceRecord, UserProfile } from '../types';
 import { Translations } from '../i18n/translations';
 import { formatCurrencyHkd, formatCurrencyIdr, formatDate } from '../utils/formatters';
-import { createPersonalPaymentToken, recordManualPersonalPayment, savePendingPersonalPayment, idrToUsdDisplay, getStoredAuth } from '../utils/api';
+import { sendPayPalPayout, idrToUsdDisplay, getStoredAuth } from '../utils/api';
 
 interface RemittanceTrackerProps {
   data: AppData;
@@ -56,7 +56,7 @@ export const RemittanceTracker: React.FC<RemittanceTrackerProps> = ({
     e.preventDefault();
     setSendError(null);
 
-    // The PayPal Personal Payments flow requires an authenticated remitter
+    // The PayPal Payouts flow requires an authenticated remitter
     // session. If there's no session we open the auth modal first — the
     // user logs in as Siti and retries. Form values are preserved while
     // the modal is open.
@@ -71,20 +71,20 @@ export const RemittanceTracker: React.FC<RemittanceTrackerProps> = ({
     const monthYear = date.slice(0, 7);
     const amountUsd = idrToUsdDisplay(amountIdr);
 
-    // Create a Personal Payments v2 token (sandbox). The server derives
-    // the USD amount from the IDR total at Rp 16,000/USD.
-    const result = await createPersonalPaymentToken({
+    // Trigger the PayPal payout to Slamet (server-side, from Siti's own
+    // business account). The server derives the USD amount from the IDR
+    // total at Rp 16,000/USD.
+    const result = await sendPayPalPayout({
       amountIdr: Number(amountIdr),
-      externalReferenceId: `remitpal-${monthYear}-${Date.now()}`,
+      amountUsd,
       note: notes,
-      returnUrl: window.location.origin + window.location.pathname,
     });
 
-    if (!result.success || !result.token) {
-      const errMsg = result.error || 'PayPal token creation failed. Please try again.';
+    if (!result.success || !result.payout) {
+      const errMsg = result.error || 'PayPal payout failed. Please try again.';
       // A 401 means the session expired or was cleared (e.g. DB reset) —
       // prompt re-login instead of showing a cryptic server error.
-      if (/unauthorized|session|token/i.test(errMsg)) {
+      if (/unauthorized|session expired/i.test(errMsg)) {
         setSendError('Your session expired. Please log in as Siti again.');
         onOpenAuthModal();
       } else {
@@ -94,79 +94,34 @@ export const RemittanceTracker: React.FC<RemittanceTrackerProps> = ({
       return;
     }
 
-    const payToken = result.token;
+    const payout = result.payout;
+    const isReceived = payout.batchStatus === 'SUCCESS' || payout.transactionStatus === 'SUCCESS';
+    const currencyLabel = payout.amount?.currency || 'USD';
+    const amountLabel = payout.amount?.value || amountUsd;
+    const mockTag = payout.mock ? ' (MOCK — DEMO MODE, no PayPal payment moved)' : '';
 
-    // DEMO MODE (mock): no redirect, no real payment. Use the explicit
-    // manual-record path, then build the ledger record labelled MOCK.
-    if (payToken.mock) {
-      // Standard split (5M renovation / 3.5M tuition / 4M allowance /
-      // 2.5M savings), scaled proportionally to the IDR amount.
-      const scale = Number(amountIdr) / 15000000;
-      const allocations = {
-        renovation: Math.round(5000000 * scale),
-        tuition: Math.round(3500000 * scale),
-        allowance: Math.round(4000000 * scale),
-        savings: Math.round(2500000 * scale),
-      };
-      const manual = await recordManualPersonalPayment({
-        amountIdr: Number(amountIdr),
-        monthYear,
-        allocations,
-        note: notes,
-      });
-      if (!manual.success || !manual.referenceNo) {
-        setSendError(manual.error || 'DEMO MODE manual record failed. Please try again.');
-        setSending(false);
-        return;
-      }
-      const newRecord: RemittanceRecord = {
-        id: `rem-${Date.now()}`,
-        date,
-        monthYear,
-        amountIdr: Number(amountIdr),
-        transferService: 'PayPal (Personal Payments v2, sandbox)',
-        sender: `${data.workerProfile.name} (Hong Kong)`,
-        receiver: `${data.workerProfile.husbandName} (Indramayu)`,
-        referenceNo: manual.referenceNo,
-        notes: `${notes ? notes + ' ' : ''}PayPal Personal Payments v2 (sandbox) · USD ${amountUsd} · token ${payToken.tokenId} (MOCK — DEMO MODE, no PayPal payment moved).`,
-        status: 'received'
-      };
-      // Persist through the existing flow (local state + /api/remittances,
-      // which also fires the activity notification + WhatsApp broadcast).
-      onAddRemittance(newRecord);
-      setSending(false);
-      setShowAddModal(false);
-      resetModal();
-      return;
-    }
-
-    if (!payToken.initiatePaymentUrl) {
-      setSendError('PayPal did not return an approval URL. Please try again.');
-      setSending(false);
-      return;
-    }
-
-    // Real (sandbox) flow: store the pending transfer BEFORE redirecting —
-    // PayPal's return carries no token id, so the return handler in App.tsx
-    // needs this to look the token up and verify COMPLETED. No ledger
-    // record is created until that verification succeeds.
-    const scale = Number(amountIdr) / 15000000;
-    savePendingPersonalPayment({
-      tokenId: payToken.tokenId,
-      amountIdr: Number(amountIdr),
+    // Build the ledger record from the PayPal result. The reference number is
+    // the PayPal payout batch id, and the transfer service is always PayPal
+    // (remittance can only be sent by Siti to Slamet via PayPal).
+    const newRecord: RemittanceRecord = {
+      id: `rem-${Date.now()}`,
+      date,
       monthYear,
-      allocations: {
-        renovation: Math.round(5000000 * scale),
-        tuition: Math.round(3500000 * scale),
-        allowance: Math.round(4000000 * scale),
-        savings: Math.round(2500000 * scale),
-      },
-      note: notes,
-      amountUsd,
-      currency: 'USD',
-      source: 'tracker',
-    });
-    window.location.href = payToken.initiatePaymentUrl;
+      amountIdr: Number(amountIdr),
+      transferService: 'PayPal (Payouts v1, sandbox)',
+      sender: `${data.workerProfile.name} (Hong Kong)`,
+      receiver: `${data.workerProfile.husbandName} (Indramayu)`,
+      referenceNo: payout.payoutBatchId,
+      notes: `${notes ? notes + ' ' : ''}Sent via PayPal (${currencyLabel} ${amountLabel})${mockTag}. PayPal Batch: ${payout.payoutBatchId}.`,
+      status: isReceived ? 'received' : 'in_transit'
+    };
+
+    // Persist through the existing flow (local state + /api/remittances,
+    // which also fires the activity notification + WhatsApp broadcast).
+    onAddRemittance(newRecord);
+    setSending(false);
+    setShowAddModal(false);
+    resetModal();
   };
 
   return (
@@ -330,13 +285,13 @@ export const RemittanceTracker: React.FC<RemittanceTrackerProps> = ({
               <div className="p-3 rounded-xl border border-[#0070ba]/30 dark:border-[#0070ba]/40 bg-[#0070ba]/5">
                 <div className="flex items-center gap-1.5 mb-2">
                   <span className="text-xs font-bold text-[#003087] dark:text-[#3d7ff0]">PayPal</span>
-                  <span className="text-xs text-neutral-500 dark:text-neutral-400">— Personal Payments v2 (sandbox), to Slamet's PayPal account</span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">— Payouts v1 (sandbox), to Slamet's PayPal account</span>
                 </div>
                 <p className="text-xs font-mono font-semibold text-neutral-800 dark:text-neutral-100">
                   USD {derivedUsd} — derived from {formatCurrencyIdr(amountIdr)} at Rp 16,000/USD, display rate only
                 </p>
                 <p className="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400">
-                  A PayPal Personal Payments token is created and you approve it in PayPal's UI. The ledger record is created only after PayPal confirms the payment on return.
+                  A PayPal payout is sent from Siti's own business account to Slamet's PayPal account. The ledger record is created only after PayPal reports the payout SUCCESS.
                 </p>
               </div>
 

@@ -15,8 +15,7 @@ import { AppData, RemittanceRecord, UserProfile } from '../types';
 import { formatCurrencyIdr } from '../utils/formatters';
 import {
   sendAgentMessage,
-  createPersonalPaymentToken,
-  savePendingPersonalPayment,
+  sendPayPalPayout,
   idrToUsdDisplay,
   getStoredAuth,
   type AgentHistoryTurn,
@@ -29,7 +28,7 @@ interface ChatMessage {
   text?: string;
   imageUrl?: string; // preview for user image messages
   pendingAction?: RemittanceApprovalDraft;
-  actionState?: 'pending' | 'approving' | 'redirecting' | 'approved' | 'rejected';
+  actionState?: 'pending' | 'approving' | 'approved' | 'rejected';
   actionError?: string;
   actionNote?: string; // e.g. DEMO MODE note shown on the approved banner
 }
@@ -179,11 +178,12 @@ export const ChatBar: React.FC<ChatBarProps> = ({
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
-  // Approve a pending remittance draft: creates a PayPal Personal Payments
-  // v2 token (sandbox) and redirects Siti to PayPal's UI. No ledger record
-  // is created here — the record is created only after the PayPal return
-  // is verified in App.tsx. In mock mode (DEMO MODE) there is no redirect:
-  // the record is created immediately and labelled MOCK.
+  // Approve a pending remittance draft: runs the PayPal Payouts v1 flow
+  // (sandbox) from Siti's own business account to Slamet's verified
+  // email. A ledger record is created ONLY when PayPal reports the
+  // payout item SUCCESS, with the real payout batch id as the reference
+  // number. In mock mode (DEMO MODE) there is no PayPal call: the record
+  // is created immediately and labelled MOCK.
   const handleApprove = useCallback(
     async (msg: ChatMessage) => {
       if (!msg.pendingAction) return;
@@ -205,71 +205,50 @@ export const ChatBar: React.FC<ChatBarProps> = ({
         .map(([k, v]) => `${k} ${formatCurrencyIdr(Number(v))}`)
         .join('; ');
 
-      const result = await createPersonalPaymentToken({
+      const result = await sendPayPalPayout({
         amountIdr,
-        externalReferenceId: `remitpal-${monthYear}-${Date.now()}`,
-        note: msg.pendingAction.note,
-        returnUrl: window.location.origin + window.location.pathname,
-      });
-
-      if (!result.success || !result.token) {
-        updateMessage(msg.id, {
-          actionState: 'pending',
-          actionError: result.error || 'PayPal token creation failed. Please try again.',
-        });
-        return;
-      }
-
-      const payToken = result.token;
-
-      // DEMO MODE (mock): no redirect, no real payment. Create the record
-      // immediately, labelled MOCK, with the mock token id as reference.
-      if (payToken.mock) {
-        const record: RemittanceRecord = {
-          id: `rem-${Date.now()}`,
-          date: today,
-          monthYear,
-          amountIdr,
-          transferService: 'PayPal (Personal Payments v2, sandbox)',
-          sender: `${data.workerProfile.name} (Hong Kong)`,
-          receiver: `${data.workerProfile.husbandName} (Indramayu)`,
-          referenceNo: payToken.tokenId,
-          notes:
-            `${msg.pendingAction.note ? msg.pendingAction.note + ' ' : ''}` +
-            `Allocation: ${allocLines || 'n/a'}. PayPal Personal Payments v2 (sandbox) · USD ${amountUsd} · token ${payToken.tokenId} (MOCK — DEMO MODE, no PayPal payment moved).`,
-          status: 'received',
-        };
-        onAddRemittance(record);
-        updateMessage(msg.id, {
-          actionState: 'approved',
-          actionNote: 'DEMO MODE — no PayPal payment moved (MOCK).',
-        });
-        return;
-      }
-
-      if (!payToken.initiatePaymentUrl) {
-        updateMessage(msg.id, {
-          actionState: 'pending',
-          actionError: 'PayPal did not return an approval URL. Please try again.',
-        });
-        return;
-      }
-
-      // Real (sandbox) flow: store the pending transfer BEFORE redirecting —
-      // PayPal's return carries no token id, so the return handler in App.tsx
-      // needs this to look the token up and verify COMPLETED.
-      savePendingPersonalPayment({
-        tokenId: payToken.tokenId,
-        amountIdr,
-        monthYear,
-        allocations: msg.pendingAction.allocations || {},
-        note: msg.pendingAction.note || '',
         amountUsd,
-        currency: 'USD',
-        source: 'chat',
+        note: msg.pendingAction.note,
       });
-      updateMessage(msg.id, { actionState: 'redirecting' });
-      window.location.href = payToken.initiatePaymentUrl;
+
+      if (!result.success || !result.payout) {
+        updateMessage(msg.id, {
+          actionState: 'pending',
+          actionError: result.error || 'PayPal payout failed. Please try again.',
+        });
+        return;
+      }
+
+      const payout = result.payout;
+      const isReceived = payout.batchStatus === 'SUCCESS' || payout.transactionStatus === 'SUCCESS';
+      const mockTag = payout.mock ? ' (MOCK — DEMO MODE, no PayPal payment moved)' : '';
+
+      // Build the ledger record from the PayPal result. The reference number
+      // is the PayPal payout batch id, and the transfer service is always
+      // PayPal (remittance can only be sent by Siti to Slamet via PayPal).
+      const record: RemittanceRecord = {
+        id: `rem-${Date.now()}`,
+        date: today,
+        monthYear,
+        amountIdr,
+        transferService: 'PayPal (Payouts v1, sandbox)',
+        sender: `${data.workerProfile.name} (Hong Kong)`,
+        receiver: `${data.workerProfile.husbandName} (Indramayu)`,
+        referenceNo: payout.payoutBatchId,
+        notes:
+          `${msg.pendingAction.note ? msg.pendingAction.note + ' ' : ''}` +
+          `Allocation: ${allocLines || 'n/a'}. PayPal Payouts v1 (sandbox) · USD ${amountUsd} · batch ${payout.payoutBatchId}${mockTag}.`,
+        status: isReceived ? 'received' : 'in_transit',
+      };
+      onAddRemittance(record);
+      updateMessage(msg.id, {
+        actionState: 'approved',
+        actionNote: payout.mock
+          ? 'DEMO MODE — no PayPal payment moved (MOCK).'
+          : isReceived
+            ? `PayPal payout confirmed (batch ${payout.payoutBatchId}).`
+            : `PayPal payout ${payout.batchStatus || 'pending'} — record is in transit; check the Remittances tab.`,
+      });
     },
     [data.workerProfile, onAddRemittance, onOpenAuthModal, updateMessage]
   );
@@ -490,13 +469,6 @@ const MessageBubble: React.FC<{
               </div>
             )}
 
-            {/* Redirecting: Siti is being sent to PayPal's UI to approve */}
-            {message.actionState === 'redirecting' && (
-              <div className="w-full p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-950/30 flex items-center justify-center gap-3 rounded-bl-md">
-                <Loader2 className="w-5 h-5 animate-spin text-emerald-600 dark:text-emerald-400" />
-                <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Redirecting to PayPal to approve…</span>
-              </div>
-            )}
 
             {/* Rejected: compact grey banner — no buttons */}
             {message.actionState === 'rejected' && (
@@ -541,7 +513,7 @@ const MessageBubble: React.FC<{
 
                   {/* PayPal send amount — derived server-side, read-only */}
                   <div className="pt-1.5 mt-1.5 border-t border-emerald-200/60 dark:border-emerald-800/60">
-                    <div className="text-neutral-500 mb-1">Send via PayPal (Personal Payments v2, sandbox)</div>
+                    <div className="text-neutral-500 mb-1">Send via PayPal (Payouts v1, sandbox)</div>
                     <p className="font-mono font-semibold">
                       USD {idrToUsdDisplay(message.pendingAction.amountIdr)} — derived from{' '}
                       {formatCurrencyIdr(message.pendingAction.amountIdr)} at Rp 16,000/USD, display rate only
